@@ -5,6 +5,7 @@ import path from 'node:path'
 
 // Vite config — https://vitejs.dev/config/
 export default defineConfig({
+  base: '/Bakeflow/', // <--- Agrega esta línea con el nombre de tu repositorio
   plugins: [
     react(),
     tailwindcss(),
