@@ -28,7 +28,10 @@ const orderSchema = new mongoose.Schema({
   },
   deliveryDate: { type: Date, required: [true, 'La fecha de entrega es obligatoria'] },
   totalPrice: { type: Number, required: true, default: 0 },
-  platformCommission: { type: Number, default: 0 }
+  platformCommission: { type: Number, default: 0 },
+  isPointOfSale: { type: Boolean, default: false }, // ¿Fue venta en el local?
+  paymentMethod: { type: String, enum: ['cash', 'card', 'transfer', 'pending'], default: 'pending' },
+  deliveryMethod: { type: String, enum: ['pickup', 'delivery'], default: 'pickup' },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Order', orderSchema);

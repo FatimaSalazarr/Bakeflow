@@ -33,3 +33,12 @@ exports.updateIncident = async (req, res) => {
     res.status(400).json({ ok: false, message: 'Error al actualizar incidencia' });
   }
 };
+
+exports.deleteIncident = async (req, res) => {
+  try {
+    await Incident.findByIdAndDelete(req.params.id);
+    res.json({ ok: true, message: 'Incidencia eliminada correctamente' });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: 'Error al eliminar incidencia' });
+  }
+};

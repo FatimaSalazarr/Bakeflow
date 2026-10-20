@@ -7,5 +7,7 @@ router.use(verifyToken);
 
 router.get('/', notificationController.getMyNotifications);
 router.patch('/:id/read', notificationController.markAsRead);
+router.post('/', verifyToken, notificationController.createNotification);
+router.get('/all', verifyToken, notificationController.getAllNotifications);
 
 module.exports = router;

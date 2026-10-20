@@ -6,7 +6,7 @@ const { verifyToken, authorizeRoles } = require('../middlewares/auth.middleware'
 router.use(verifyToken);
 
 router.get('/', orderController.getOrders);
-router.post('/', authorizeRoles('customer', 'admin'), orderController.createOrder);
+router.post('/', authorizeRoles('customer', 'admin', 'bakery', 'employee'), orderController.createOrder);
 router.put('/:id', authorizeRoles('bakery', 'employee', 'admin'), orderController.updateOrder);
 router.delete('/:id', authorizeRoles('bakery', 'admin'), orderController.deleteOrder);
 

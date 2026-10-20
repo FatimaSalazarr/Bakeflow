@@ -47,3 +47,34 @@ exports.deleteFinanceRecord = async (req, res) => {
     res.status(500).json({ ok: false, message: 'Error al eliminar registro' });
   }
 };
+
+// Obtener métricas agrupadas por mes y año para gráficas
+exports.getFinanceMetrics = async (req, res) => {
+  try {
+    const filter = {};
+    if (req.user.role === 'bakery') filter.bakeryId = req.user.bakeryId;
+    else if (req.query.bakeryId) filter.bakeryId = req.query.bakeryId; // Admin puede filtrar por pastelería
+
+    // Agrupación avanzada con MongoDB para sumar ingresos y gastos por mes
+    const metrics = await Finance.aggregate([
+      { $match: filter },
+      {
+        $group: {
+          _id: {
+            month: { $month: "$date" },
+            year: { $year: "$date" },
+            type: "$type" // 'income' o 'expense'
+          },
+          totalAmount: { $sum: "$amount" },
+          totalCommissions: { $sum: "$commissionAmount" },
+          count: { $sum: 1 } // Número de transacciones
+        }
+      },
+      { $sort: { "_id.year": -1, "_id.month": -1 } }
+    ]);
+
+    res.json({ ok: true, metrics });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: 'Error al obtener métricas financieras', error: error.message });
+  }
+};

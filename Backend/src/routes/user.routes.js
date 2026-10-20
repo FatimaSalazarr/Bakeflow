@@ -7,8 +7,8 @@ router.use(verifyToken);
 
 router.get('/', authorizeRoles('admin', 'bakery'), userController.getUsers);
 router.put('/profile', userController.updateProfile);
-router.post('/cards', authorizeRoles('customer'), userController.addCard);
-router.delete('/cards/:cardId', authorizeRoles('customer'), userController.removeCard);
+router.post('/cards', authorizeRoles('customer', 'bakery', 'admin'), userController.addCard);
+router.delete('/cards/:cardId', authorizeRoles('customer', 'bakery', 'admin'), userController.removeCard);
 router.post('/employees', authorizeRoles('bakery', 'admin'), userController.createEmployee);
 router.patch('/:id/status', authorizeRoles('admin'), userController.updateUserStatus);
 router.delete('/:id', authorizeRoles('admin', 'bakery'), userController.deleteUser);
