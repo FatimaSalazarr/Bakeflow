@@ -2,7 +2,7 @@ import { useState } from "react";
 import {
   Home, Cake, Sparkles, Package, Bell, User, Calendar, Users,
   DollarSign, Star, BarChart2, AlertTriangle, CreditCard,
-  Tag, LogOut, ChevronLeft, ChevronRight, Store, Menu, X,
+  Tag, LogOut, ChevronLeft, ChevronRight, Store, Menu, X, ShoppingBag,
 } from "lucide-react";
 import Logo from "./Logo";
 
@@ -33,6 +33,7 @@ const NAV_ITEMS: Record<Role, NavItem[]> = {
   ],
   bakery: [
     { id: "home", label: "Dashboard", Icon: Home },
+    { id: "pos", label: "Ventas", Icon: ShoppingBag },
     { id: "menu-mgmt", label: "Mi menú", Icon: Cake },
     { id: "categories", label: "Categorías", Icon: Tag },
     { id: "orders-cal", label: "Calendario", Icon: Calendar },
@@ -43,6 +44,7 @@ const NAV_ITEMS: Record<Role, NavItem[]> = {
   ],
   employee: [
     { id: "calendar", label: "Calendario", Icon: Calendar },
+    { id: "pos", label: "Ventas", Icon: ShoppingBag },
     { id: "my-tasks", label: "Mis pedidos", Icon: Package },
   ],
   admin: [
@@ -66,8 +68,8 @@ const ROLE_META: Record<Role, { label: string; gradient: string; light: string; 
 /* Bottom tabs — show the 4 most relevant items on mobile */
 const MOBILE_TABS: Record<Role, string[]> = {
   customer: ["home", "menu", "custom-order", "my-orders"],
-  bakery:   ["home", "menu-mgmt", "orders-mgmt", "custom-requests"],
-  employee: ["calendar", "my-tasks"],
+  bakery:   ["home", "pos", "orders-mgmt", "custom-requests"],
+  employee: ["pos", "calendar", "my-tasks"],
   admin:    ["home", "bakeries", "users", "stats"],
 };
 

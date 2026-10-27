@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { Mail, Phone, MapPin, User, Pencil, Check, Store, ImagePlus, X, Cake, Users, DollarSign, Lock, Eye, EyeOff, Star, HelpCircle, AlertTriangle } from "lucide-react";
+import { Mail, Phone, MapPin, User, Pencil, Check, Store, ImagePlus, X, Cake, Users, DollarSign, Lock, Eye, EyeOff, Star, AlertTriangle } from "lucide-react";
 
 interface Props { userName: string; onNavigate: (page: string) => void; }
 
@@ -48,7 +48,7 @@ export default function BakeryProfile({ userName, onNavigate }: Props) {
   }
 
   const fields = [
-    { key: "ownerName",    label: "Nombre del dueño",  type: "text",  Icon: User },
+    { key: "ownerName",    label: "Nombre del dueño",   type: "text",  Icon: User },
     { key: "bakeryName",   label: "Nombre pastelería",  type: "text",  Icon: Store },
     { key: "email",        label: "Correo electrónico", type: "email", Icon: Mail },
     { key: "phone",        label: "Teléfono",           type: "tel",   Icon: Phone },
@@ -62,6 +62,50 @@ export default function BakeryProfile({ userName, onNavigate }: Props) {
       <div className="mb-6">
         <h1 className="font-display text-3xl font-semibold text-foreground">Mi perfil</h1>
         <p className="text-muted-foreground text-sm mt-1 font-medium">Gestiona la información de tu pastelería</p>
+      </div>
+
+      {/* Plan management arriba de todo */}
+      <div className="bg-card rounded-3xl card-shadow border border-border p-5 mb-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-bold text-foreground flex items-center gap-2">
+            <Star size={16} className="text-amber-400 fill-amber-400" /> Mi plan
+          </h2>
+          <button onClick={() => onNavigate("subscription")}
+            className="text-xs text-pink-500 font-bold hover:text-pink-600 transition-colors">
+            Ver todos los planes
+          </button>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 bg-violet-500 rounded-2xl flex items-center justify-center shrink-0">
+            <Star size={20} className="text-white fill-white" />
+          </div>
+          <div className="flex-1">
+            <div className="font-bold text-foreground">Plan Pro</div>
+            <div className="text-xs text-muted-foreground">Pedidos ilimitados · Finanzas · Estadísticas</div>
+            <div className="text-xs font-bold text-pink-500 mt-0.5">$199 / mes</div>
+          </div>
+          <button onClick={() => onNavigate("subscription")}
+            className="px-4 py-2 bg-pink-500 hover:bg-pink-600 text-white font-bold text-xs rounded-xl transition-colors shrink-0">
+            Cambiar plan
+          </button>
+        </div>
+      </div>
+
+      {/* Estadísticas abajo de el plan */}
+      <div className="grid grid-cols-3 gap-4 mb-5">
+        {[
+          { label: "Pedidos este mes", value: "34", Icon: Cake },
+          { label: "Empleados activos", value: "5", Icon: Users },
+          { label: "Ingresos mensuales", value: "$18k", Icon: DollarSign },
+        ].map(({ label, value, Icon }) => (
+          <div key={label} className="bg-card rounded-3xl card-shadow border border-border p-4 text-center">
+            <div className="flex justify-center mb-1">
+              <Icon size={22} className="text-pink-400" />
+            </div>
+            <div className="font-display text-xl font-semibold text-foreground">{value}</div>
+            <div className="text-xs text-muted-foreground font-medium">{label}</div>
+          </div>
+        ))}
       </div>
 
       {saved && (
@@ -195,56 +239,12 @@ export default function BakeryProfile({ userName, onNavigate }: Props) {
         </form>
       </div>
 
-      <div className="grid grid-cols-3 gap-4 mt-5">
-        {[
-          { label: "Pedidos este mes", value: "34", Icon: Cake },
-          { label: "Empleados activos", value: "5", Icon: Users },
-          { label: "Ingresos mensuales", value: "$18k", Icon: DollarSign },
-        ].map(({ label, value, Icon }) => (
-          <div key={label} className="bg-card rounded-3xl card-shadow border border-border p-4 text-center">
-            <div className="flex justify-center mb-1">
-              <Icon size={22} className="text-pink-400" />
-            </div>
-            <div className="font-display text-xl font-semibold text-foreground">{value}</div>
-            <div className="text-xs text-muted-foreground font-medium">{label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Plan management */}
-      <div className="bg-card rounded-3xl card-shadow border border-border p-5 mt-5">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-bold text-foreground flex items-center gap-2">
-            <Star size={16} className="text-amber-400 fill-amber-400" /> Mi plan
-          </h2>
-          <button onClick={() => onNavigate("subscription")}
-            className="text-xs text-pink-500 font-bold hover:text-pink-600 transition-colors">
-            Ver todos los planes
-          </button>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 bg-violet-500 rounded-2xl flex items-center justify-center shrink-0">
-            <Star size={20} className="text-white fill-white" />
-          </div>
-          <div className="flex-1">
-            <div className="font-bold text-foreground">Plan Pro</div>
-            <div className="text-xs text-muted-foreground">Pedidos ilimitados · Finanzas · Estadísticas</div>
-            <div className="text-xs font-bold text-pink-500 mt-0.5">$199 / mes</div>
-          </div>
-          <button onClick={() => onNavigate("subscription")}
-            className="px-4 py-2 bg-pink-500 hover:bg-pink-600 text-white font-bold text-xs rounded-xl transition-colors shrink-0">
-            Cambiar plan
-          </button>
-        </div>
-      </div>
-
       {/* Help / incidents shortcut */}
       <div className="flex justify-end mt-4 mb-2">
         <button onClick={() => onNavigate("incidents")}
           className="flex items-center gap-1.5 px-3 py-2 bg-muted border border-border rounded-full text-xs text-muted-foreground hover:bg-pink-50 hover:text-pink-500 hover:border-pink-200 transition-colors"
           title="Reportar una incidencia">
-          <HelpCircle size={14} />
-          <AlertTriangle size={12} />
+          <AlertTriangle size={14} />
           <span className="font-semibold">Reportar incidencia</span>
         </button>
       </div>

@@ -5,6 +5,7 @@ import EmployeeTasks from "./EmployeeTasks";
 import EmployeeCalendar from "./EmployeeCalendar";
 import EmployeeNotifications from "./EmployeeNotifications";
 import EmployeeProfile from "./EmployeeProfile";
+import EmployeePOS from "./EmployeePOS";
 
 interface Props {
   userName: string;
@@ -16,6 +17,7 @@ export default function EmployeeApp({ userName, onLogout }: Props) {
 
   const pages: Record<string, React.ReactNode> = {
     home: <EmployeeHome userName={userName} onNavigate={setPage} />,
+    pos: <EmployeePOS />,
     "my-tasks": <EmployeeTasks />,
     calendar: <EmployeeCalendar onNavigate={setPage} />,
     notifications: <EmployeeNotifications />,

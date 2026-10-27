@@ -11,6 +11,7 @@ import SubscriptionPage from "./SubscriptionPage";
 import BakeryIncidents from "./BakeryIncidents";
 import BakeryProfile from "./BakeryProfile";
 import BakeryCategories from "../admin/AdminCategories";
+import BakeryPOS from "./BakeryPOS";
 import type { SharedRequest } from "../../App";
 
 interface Props {
@@ -25,6 +26,7 @@ export default function BakeryApp({ userName, onLogout, customRequests, onUpdate
 
   const pages: Record<string, React.ReactNode> = {
     home: <BakeryHome userName={userName} onNavigate={setPage} />,
+    pos: <BakeryPOS />,
     "menu-mgmt": <MenuManagement />,
     "orders-cal": <OrdersCalendar />,
     "orders-mgmt": <OrdersManagement />,

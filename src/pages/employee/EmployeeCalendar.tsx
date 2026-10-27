@@ -76,7 +76,7 @@ export default function EmployeeCalendar({ onNavigate }: Props = {}) {
         <div className="lg:col-span-2 bg-card rounded-3xl card-shadow border border-border p-4 md:p-5">
           <div className="flex items-center justify-between mb-5">
             <button onClick={prevMonth} disabled={isAtMinMonth}
-              className="w-9 h-9 bg-muted hover:bg-pink-50 hover:text-pink-500 rounded-2xl flex items-center justify-center text-muted-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+              className="w-9 h-9 bg-muted hover:bg-indigo-50 hover:text-indigo-500 rounded-2xl flex items-center justify-center text-muted-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
               <ChevronLeft size={18} />
             </button>
             <h2 className="font-display text-xl font-semibold text-foreground">
@@ -109,15 +109,15 @@ export default function EmployeeCalendar({ onNavigate }: Props = {}) {
                     ${isPast
                       ? "text-muted-foreground/40 cursor-not-allowed"
                       : isSelected
-                      ? "bg-pink-500 text-white shadow-md scale-105"
+                      ? "bg-indigo-500 text-white shadow-md scale-105"
                       : isToday
-                      ? "bg-pink-50 text-pink-600 border-2 border-pink-300 font-bold"
+                      ? "bg-indigo-50 text-indigo-600 border-2 border-indigo-300 font-bold"
                       : orders.length > 0
-                      ? "bg-muted hover:bg-pink-50 text-foreground font-bold"
+                      ? "bg-muted hover:bg-indigo-50 text-foreground font-bold"
                       : "hover:bg-muted text-foreground font-medium"}`}>
                   <span className="font-bold">{day}</span>
                   {orders.length > 0 && (
-                    <div className={`w-1.5 h-1.5 rounded-full mt-0.5 ${isSelected ? "bg-white" : "bg-pink-500"}`} />
+                    <div className={`w-1.5 h-1.5 rounded-full mt-0.5 ${isSelected ? "bg-white" : "bg-indigo-500"}`} />
                   )}
                 </button>
               );
@@ -127,6 +127,18 @@ export default function EmployeeCalendar({ onNavigate }: Props = {}) {
 
         {/* Side */}
         <div className="space-y-4">
+          {/* Reminder */}
+          {upcomingDay && (
+            <div className="bg-purple-50 border-2 border-purple-200 rounded-3xl p-4 shadow-sm">
+              <div className="flex items-center gap-2 font-bold text-purple-700 text-sm mb-1">
+                <Lightbulb size={16} className="text-purple-600 fill-purple-100" /> Próxima entrega
+              </div>
+              <div className="text-xs text-purple-700 font-medium">
+                Tienes un pedido el {upcomingDay} de {MONTH_NAMES[month]}. Revisa los detalles.
+              </div>
+            </div>
+          )}
+
           {/* Selected day detail */}
           <div className="bg-card rounded-3xl card-shadow border border-border p-4 md:p-5">
             <h3 className="font-bold text-foreground mb-4 flex items-center gap-2 text-sm">
@@ -179,18 +191,6 @@ export default function EmployeeCalendar({ onNavigate }: Props = {}) {
                     </button>
                   ));
                 })}
-              </div>
-            </div>
-          )}
-
-          {/* Reminder */}
-          {upcomingDay && (
-            <div className="bg-indigo-50 border border-indigo-100 rounded-3xl p-4">
-              <div className="flex items-center gap-2 font-bold text-indigo-700 text-sm mb-1">
-                <Lightbulb size={14} /> Próxima entrega
-              </div>
-              <div className="text-xs text-indigo-600 font-medium">
-                Tienes un pedido el {upcomingDay} de {MONTH_NAMES[month]}. Revisa los detalles.
               </div>
             </div>
           )}
