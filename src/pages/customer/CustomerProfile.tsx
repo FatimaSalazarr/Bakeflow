@@ -48,6 +48,23 @@ export default function CustomerProfile({ userName }: Props) {
         <p className="text-muted-foreground text-sm mt-1 font-medium">Gestiona tu información personal</p>
       </div>
 
+      {/* Estadísticas movidas arriba */}
+      <div className="grid grid-cols-3 gap-4 mb-5">
+        {[
+          { label: "Pedidos totales", value: "12", Icon: Package },
+          { label: "Pasteles ordenados", value: "18", Icon: Cake },
+          { label: "Pastelería favorita", value: "Rosita", Icon: User },
+        ].map(({ label, value, Icon }) => (
+          <div key={label} className="bg-card rounded-3xl card-shadow border border-border p-4 text-center">
+            <div className="flex justify-center mb-1">
+              <Icon size={22} className="text-pink-400" />
+            </div>
+            <div className="font-display text-xl font-semibold text-foreground">{value}</div>
+            <div className="text-xs text-muted-foreground font-medium">{label}</div>
+          </div>
+        ))}
+      </div>
+
       {saved && (
         <div className="mb-5 bg-green-50 border border-green-200 text-green-700 px-5 py-3 rounded-2xl font-bold text-sm flex items-center gap-2">
           <Check size={16} /> Cambios guardados correctamente
@@ -157,23 +174,6 @@ export default function CustomerProfile({ userName }: Props) {
           </button>
         </form>
       </div>
-
-      <div className="grid grid-cols-3 gap-4 mt-5">
-        {[
-          { label: "Pedidos totales", value: "12", Icon: Package },
-          { label: "Pasteles ordenados", value: "18", Icon: Cake },
-          { label: "Pastelería favorita", value: "Rosita", Icon: User },
-        ].map(({ label, value, Icon }) => (
-          <div key={label} className="bg-card rounded-3xl card-shadow border border-border p-4 text-center">
-            <div className="flex justify-center mb-1">
-              <Icon size={22} className="text-pink-400" />
-            </div>
-            <div className="font-display text-xl font-semibold text-foreground">{value}</div>
-            <div className="text-xs text-muted-foreground font-medium">{label}</div>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
-

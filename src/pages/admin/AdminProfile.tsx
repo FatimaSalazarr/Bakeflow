@@ -60,6 +60,23 @@ export default function AdminProfile({ userName }: Props) {
         <p className="text-muted-foreground text-sm mt-1 font-medium">Información de tu cuenta de administrador</p>
       </div>
 
+      {/* Estadísticas movidas arriba */}
+      <div className="grid grid-cols-3 gap-4 mb-5">
+        {[
+          { label: "Pastelerías activas", value: "248", Icon: Store },
+          { label: "Usuarios totales", value: "4.8k", Icon: Users },
+          { label: "Incidencias resueltas", value: "32", Icon: ShieldCheck },
+        ].map(({ label, value, Icon }) => (
+          <div key={label} className="bg-card rounded-3xl card-shadow border border-border p-4 text-center">
+            <div className="flex justify-center mb-1">
+              <Icon size={22} className="text-rose-400" />
+            </div>
+            <div className="font-display text-xl font-semibold text-foreground">{value}</div>
+            <div className="text-xs text-muted-foreground font-medium">{label}</div>
+          </div>
+        ))}
+      </div>
+
       {saved && (
         <div className="mb-5 bg-green-50 border border-green-200 text-green-700 px-5 py-3 rounded-2xl font-bold text-sm flex items-center gap-2">
           <Check size={16} /> Cambios guardados correctamente
@@ -189,22 +206,6 @@ export default function AdminProfile({ userName }: Props) {
             <Lock size={14} /> Actualizar contraseña
           </button>
         </form>
-      </div>
-
-      <div className="grid grid-cols-3 gap-4 mt-5">
-        {[
-          { label: "Pastelerías activas", value: "248", Icon: Store },
-          { label: "Usuarios totales", value: "4.8k", Icon: Users },
-          { label: "Incidencias resueltas", value: "32", Icon: ShieldCheck },
-        ].map(({ label, value, Icon }) => (
-          <div key={label} className="bg-card rounded-3xl card-shadow border border-border p-4 text-center">
-            <div className="flex justify-center mb-1">
-              <Icon size={22} className="text-rose-400" />
-            </div>
-            <div className="font-display text-xl font-semibold text-foreground">{value}</div>
-            <div className="text-xs text-muted-foreground font-medium">{label}</div>
-          </div>
-        ))}
       </div>
     </div>
   );

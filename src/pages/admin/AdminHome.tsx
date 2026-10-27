@@ -1,4 +1,4 @@
-import { Store, Users, Star, DollarSign, BarChart2, CreditCard, ArrowRight, TrendingUp } from "lucide-react";
+import { Store, Users, Star, DollarSign, BarChart2, CreditCard, ArrowRight, TrendingUp, AlertTriangle } from "lucide-react";
 
 interface Props { onNavigate: (page: string) => void; }
 
@@ -37,6 +37,7 @@ export default function AdminHome({ onNavigate }: Props) {
     { label: "Usuarios totales", value: "4,821", sub: "+89 esta semana", Icon: Users, color: "bg-violet-500" },
     { label: "Suscripciones activas", value: "189", sub: "76% Pro o Premium", Icon: Star, color: "bg-amber-400" },
     { label: "Ingresos mensuales", value: "$42,180", sub: "+18% vs agosto", Icon: DollarSign, color: "bg-indigo-500" },
+    { label: "Incidencias del mes", value: "12", sub: "8 resueltas", Icon: AlertTriangle, color: "bg-rose-500" },
   ];
 
   const recent = [
@@ -54,7 +55,7 @@ export default function AdminHome({ onNavigate }: Props) {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         {stats.map(({ label, value, sub, Icon, color }) => (
           <div key={label} className="bg-card rounded-3xl card-shadow border border-border p-5">
             <div className={`w-11 h-11 ${color} rounded-2xl flex items-center justify-center mb-3`}>

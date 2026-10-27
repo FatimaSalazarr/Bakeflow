@@ -48,7 +48,7 @@ export default function EmployeeProfile({ userName }: Props) {
   }
 
   const fields = [
-    { key: "name",       label: "Nombre completo",    type: "text",  Icon: User },
+    { key: "name",      label: "Nombre completo",    type: "text",  Icon: User },
     { key: "position",   label: "Puesto",             type: "text",  Icon: Star },
     { key: "department", label: "Departamento",       type: "text",  Icon: Package },
     { key: "email",      label: "Correo electrónico", type: "email", Icon: Mail },
@@ -62,6 +62,23 @@ export default function EmployeeProfile({ userName }: Props) {
       <div className="mb-6">
         <h1 className="font-display text-3xl font-semibold text-foreground">Mi perfil</h1>
         <p className="text-muted-foreground text-sm mt-1 font-medium">Tu información como empleada</p>
+      </div>
+
+      {/* Estadísticas movidas arriba */}
+      <div className="grid grid-cols-3 gap-4 mb-5">
+        {[
+          { label: "Pedidos completados", value: "47", Icon: Package },
+          { label: "Pasteles elaborados", value: "63", Icon: Cake },
+          { label: "Meses en la empresa", value: "8", Icon: Calendar },
+        ].map(({ label, value, Icon }) => (
+          <div key={label} className="bg-card rounded-3xl card-shadow border border-border p-4 text-center">
+            <div className="flex justify-center mb-1">
+              <Icon size={22} className="text-indigo-400" />
+            </div>
+            <div className="font-display text-xl font-semibold text-foreground">{value}</div>
+            <div className="text-xs text-muted-foreground font-medium">{label}</div>
+          </div>
+        ))}
       </div>
 
       {saved && (
@@ -193,22 +210,6 @@ export default function EmployeeProfile({ userName }: Props) {
             <Lock size={14} /> Actualizar contraseña
           </button>
         </form>
-      </div>
-
-      <div className="grid grid-cols-3 gap-4 mt-5">
-        {[
-          { label: "Pedidos completados", value: "47", Icon: Package },
-          { label: "Pasteles elaborados", value: "63", Icon: Cake },
-          { label: "Meses en la empresa", value: "8", Icon: Calendar },
-        ].map(({ label, value, Icon }) => (
-          <div key={label} className="bg-card rounded-3xl card-shadow border border-border p-4 text-center">
-            <div className="flex justify-center mb-1">
-              <Icon size={22} className="text-indigo-400" />
-            </div>
-            <div className="font-display text-xl font-semibold text-foreground">{value}</div>
-            <div className="text-xs text-muted-foreground font-medium">{label}</div>
-          </div>
-        ))}
       </div>
     </div>
   );
