@@ -2,7 +2,7 @@ import { useState } from "react";
 import {
   Home, Cake, Sparkles, Package, Bell, User, Calendar, Users,
   DollarSign, Star, BarChart2, AlertTriangle, CreditCard,
-  Tag, LogOut, ChevronLeft, ChevronRight, Store, Menu, X, ShoppingBag,
+  Tag, LogOut, ChevronLeft, ChevronRight, Store, Menu, X, ShoppingBag, Settings,
 } from "lucide-react";
 import Logo from "./Logo";
 
@@ -30,6 +30,7 @@ const NAV_ITEMS: Record<Role, NavItem[]> = {
     { id: "menu", label: "Menú", Icon: Cake },
     { id: "custom-order", label: "Pastel especial", Icon: Sparkles },
     { id: "my-orders", label: "Mis pedidos", Icon: Package },
+    { id: "notifications", label: "Notificaciones", Icon: Bell },
   ],
   bakery: [
     { id: "home", label: "Dashboard", Icon: Home },
@@ -46,6 +47,7 @@ const NAV_ITEMS: Record<Role, NavItem[]> = {
     { id: "calendar", label: "Calendario", Icon: Calendar },
     { id: "pos", label: "Ventas", Icon: ShoppingBag },
     { id: "my-tasks", label: "Mis pedidos", Icon: Package },
+    { id: "notifications", label: "Notificaciones", Icon: Bell },
   ],
   admin: [
     { id: "home", label: "Dashboard", Icon: Home },
@@ -55,6 +57,7 @@ const NAV_ITEMS: Record<Role, NavItem[]> = {
     { id: "transactions", label: "Transacciones", Icon: CreditCard },
     { id: "stats", label: "Estadísticas", Icon: BarChart2 },
     { id: "incidents", label: "Incidencias", Icon: AlertTriangle },
+    { id: "settings", label: "Configuración", Icon: Settings },
   ],
 };
 
@@ -96,7 +99,8 @@ export default function Layout({ role, userName, activePage, onNavigate, onLogou
         <Logo size={30} className="rounded-xl shrink-0" />
         <span className="font-display text-lg font-bold text-pink-500 flex-1 leading-none">BakeFlow</span>
         {notifications > 0 && (
-          <div className="w-6 h-6 bg-pink-500 text-white text-xs font-bold rounded-full flex items-center justify-center shrink-0">{notifications}</div>
+          <button onClick={() => navItems.some((n) => n.id === "notifications") && onNavigate("notifications")}
+            className="w-6 h-6 bg-pink-500 text-white text-xs font-bold rounded-full flex items-center justify-center shrink-0">{notifications}</button>
         )}
       </header>
 

@@ -1,50 +1,29 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ChevronLeft, ChevronRight, Package, Calendar } from "lucide-react";
+import { api } from "../../services/api";
+import { isDeadStatus, DB_TO_UI, orderCode, orderTitle, dateKeyOf, clientName } from "../../services/orders";
 
 const DAYS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
 
 const MONTH_NAMES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 
-/* Orders keyed by "YYYY-MM-DD" */
-const ORDERS_DATA: Record<string, { id: string; client: string; cake: string; status: string }[]> = {
-  "2026-08-10": [{ id: "#1042", client: "Luna G.", cake: "Pastel de fresa", status: "progress" }],
-  "2026-08-11": [
-    { id: "#1043", client: "Carlos M.", cake: "Pastel de cumpleaños", status: "progress" },
-    { id: "#1044", client: "Andrea T.", cake: "Cupcakes x24", status: "pending" },
-  ],
-  "2026-08-13": [{ id: "#1042", client: "Luna G.", cake: "Pastel de fresa", status: "ready" }],
-  "2026-08-15": [{ id: "#1045", client: "Valentina R.", cake: "Pastel de bodas", status: "pending" }],
-  "2026-08-18": [{ id: "#1046", client: "Miguel S.", cake: "Red Velvet", status: "pending" }],
-  "2026-08-20": [{ id: "#1047", client: "Fernanda L.", cake: "Pastel Galaxy", status: "pending" }],
-  "2026-08-25": [
-    { id: "#1048", client: "Roberto A.", cake: "Cupcakes rainbow", status: "pending" },
-    { id: "#1049", client: "Isabel C.", cake: "Cheesecake", status: "pending" },
-  ],
-  "2026-09-05": [{ id: "#1051", client: "Diana P.", cake: "Pastel de vainilla", status: "pending" }],
-  "2026-09-10": [{ id: "#1052", client: "Marco F.", cake: "Red Velvet kawaii", status: "progress" }],
-  "2026-09-14": [
-    { id: "#1053", client: "Sofía H.", cake: "Pastel unicornio", status: "pending" },
-    { id: "#1054", client: "Luis R.", cake: "Cheesecake NY", status: "pending" },
-  ],
-  "2026-09-18": [{ id: "#1055", client: "Carla B.", cake: "Cupcakes x12", status: "pending" }],
-  "2026-09-22": [{ id: "#1056", client: "Ana M.", cake: "Pastel de bodas", status: "pending" }],
-  "2026-10-03": [{ id: "#1057", client: "Rebeca T.", cake: "Pastel floral", status: "pending" }],
-  "2026-10-10": [{ id: "#1058", client: "Hugo V.", cake: "Pastel Galaxy", status: "pending" }],
-};
+interface CalOrder { id: string; client: string; cake: string; status: string; }
 
 const STATUS_BADGE: Record<string, string> = {
   pending: "badge-pending",
   progress: "badge-progress",
   ready: "badge-ready",
+  delivered: "badge-delivered",
 };
 const STATUS_DOT: Record<string, string> = {
   pending: "bg-amber-400",
   progress: "bg-blue-400",
   ready: "bg-green-400",
+  delivered: "bg-gray-400",
 };
 const STATUS_LABEL: Record<string, string> = {
-  pending: "Pendiente", progress: "En proceso", ready: "Listo",
+  pending: "Pendiente", progress: "En proceso", ready: "Listo", delivered: "Entregado",
 };
 
 function dateKey(year: number, month: number, day: number) {
@@ -53,9 +32,26 @@ function dateKey(year: number, month: number, day: number) {
 
 export default function OrdersCalendar() {
   const today = new Date();
-  const [year, setYear] = useState(2026);
-  const [month, setMonth] = useState(8); // 0-indexed; 8 = September
-  const [selectedKey, setSelectedKey] = useState<string | null>("2026-09-10");
+  const [year, setYear] = useState(today.getFullYear());
+  const [month, setMonth] = useState(today.getMonth()); // 0-indexed
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [ordersData, setOrdersData] = useState<Record<string, CalOrder[]>>({});
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    api<{ orders: any[] }>("/orders")
+      .then(({ orders }) => {
+        const grouped: Record<string, CalOrder[]> = {};
+        for (const o of orders) {
+          if (isDeadStatus(o.status)) continue;
+          (grouped[dateKeyOf(o.deliveryDate)] ||= []).push({
+            id: orderCode(o), client: clientName(o), cake: orderTitle(o), status: DB_TO_UI[o.status] || "pending",
+          });
+        }
+        setOrdersData(grouped);
+      })
+      .catch((e) => setError(e.message));
+  }, []);
 
   const isAtMinMonth = year === today.getFullYear() && month === today.getMonth();
 
@@ -80,11 +76,11 @@ export default function OrdersCalendar() {
   const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month;
   const todayDate = today.getDate();
 
-  const selectedOrders = selectedKey ? (ORDERS_DATA[selectedKey] ?? []) : [];
+  const selectedOrders = selectedKey ? (ordersData[selectedKey] ?? []) : [];
   const selectedDay = selectedKey ? Number(selectedKey.split("-")[2]) : null;
 
   // Count total orders this month
-  const monthOrders = Object.entries(ORDERS_DATA)
+  const monthOrders = Object.entries(ordersData)
     .filter(([k]) => k.startsWith(`${year}-${String(month + 1).padStart(2, "0")}`))
     .flatMap(([, v]) => v);
 
@@ -99,6 +95,7 @@ export default function OrdersCalendar() {
         </p>
       </div>
 
+      {error && <div className="mb-4 bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Calendar grid */}
         <div className="lg:col-span-2 bg-card rounded-3xl card-shadow border border-border p-4 md:p-5">
@@ -129,7 +126,7 @@ export default function OrdersCalendar() {
             {cells.map((day, i) => {
               if (!day) return <div key={i} />;
               const key = dateKey(year, month, day);
-              const orders = ORDERS_DATA[key] ?? [];
+              const orders = ordersData[key] ?? [];
               const isSelected = key === selectedKey;
               const isToday = isCurrentMonth && day === todayDate;
               const isPast = isCurrentMonth && day < todayDate;

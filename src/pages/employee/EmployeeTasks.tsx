@@ -1,12 +1,24 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Cake, Clock, ChefHat, CheckCircle2, Phone, User, AlertTriangle, Palette, MessageSquare, X, Lock, Store } from "lucide-react";
+import { api } from "../../services/api";
+import { isDeadStatus, DB_TO_UI, UI_TO_DB, orderCode, orderTitle, fmtDate, clientName, type UiStatus } from "../../services/orders";
 
-const TASKS = [
-  { id: "#1043", cake: "Pastel de cumpleaños", client: "Carlos M.", phone: "+52 55 1111 2222", date: "12 Sep 2026", status: "progress", flavor: "Chocolate", frosting: "Ganache de chocolate", size: "Grande (15-20 personas)", message: "¡Feliz cumpleaños Diego!", decorations: "Figuras de fondant de fútbol, colores verde y blanco", notes: "Alergia a las nueces. El cliente recoge a las 5pm.", design: "Pelota de fútbol en 3D encima del pastel" },
-  { id: "#1044", cake: "Cupcakes x24", client: "Andrea T.", phone: "+52 55 3333 4444", date: "11 Sep 2026", status: "progress", flavor: "Vainilla y chocolate", frosting: "Betún de colores pastel", size: "24 piezas", message: "", decorations: "Flores pequeñas de betún, perlas de azúcar", notes: "Entregar en caja individual cada cupcake", design: "Colores rosa, lila y menta" },
-  { id: "#1048", cake: "Cupcakes rainbow", client: "Roberto A.", phone: "+52 55 7777 8888", date: "25 Sep 2026", status: "pending", flavor: "Arcoíris (masas de colores)", frosting: "Crema de mantequilla multicolor", size: "12 piezas", message: "¡Feliz cumpleaños Sofía!", decorations: "Glitter comestible, arcoíris de fondant", notes: "", design: "Tema arcoíris kawaii" },
-];
+interface Task {
+  id: string; dbId: string; cake: string; client: string; phone: string; date: string; status: string;
+  flavor: string; frosting: string; size: string; message: string; decorations: string; notes: string; design: string;
+}
 
+function toTask(o: any): Task {
+  const d = o.customDetails || {};
+  const units = (o.items || []).reduce((s: number, i: any) => s + i.quantity, 0);
+  return {
+    id: orderCode(o), dbId: o._id, cake: orderTitle(o), client: clientName(o), phone: o.customerId?.phone || "—",
+    date: fmtDate(o.deliveryDate), status: DB_TO_UI[o.status] || "pending",
+    flavor: d.flavor || "—", frosting: d.filling || "—",
+    size: d.size || (units ? `${units} ${units === 1 ? "pieza" : "piezas"}` : "—"),
+    message: "", decorations: d.designDescription || "—", notes: d.specialInstructions || "", design: d.designDescription || "—",
+  };
+}
 const STATUS_OPTIONS = [
   { val: "pending",  label: "Pendiente",  Icon: Clock,        active: "bg-amber-50 text-amber-600 border-amber-200" },
   { val: "progress", label: "En proceso", Icon: ChefHat,      active: "bg-blue-50 text-blue-600 border-blue-200" },
@@ -15,42 +27,76 @@ const STATUS_OPTIONS = [
 
 const STATUS_LABEL: Record<string, string> = { pending: "Pendiente", progress: "En proceso", ready: "Listo" };
 
-const BAKERY_CREDENTIALS = { user: "dulceria@mail.com", password: "demo123" };
-
 export default function EmployeeTasks() {
-  const [selected, setSelected] = useState(TASKS[0].id);
-  const [statuses, setStatuses] = useState<Record<string, string>>(
-    Object.fromEntries(TASKS.map((t) => [t.id, t.status]))
-  );
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [selected, setSelected] = useState("");
   const [authModal, setAuthModal] = useState<{ taskId: string; targetStatus: string } | null>(null);
   const [authUser, setAuthUser] = useState("");
   const [authPass, setAuthPass] = useState("");
   const [authError, setAuthError] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
 
-  const sel = TASKS.find((t) => t.id === selected)!;
-  const currentStatus = statuses[sel.id];
+  // El backend ya devuelve solo los pedidos asignados a este empleado
+  useEffect(() => {
+    api<{ orders: any[] }>("/orders")
+      .then(({ orders }) => {
+        const list = orders.filter((o) => !isDeadStatus(o.status) && o.status !== "delivered").map(toTask);
+        setTasks(list);
+        setSelected(list[0]?.id ?? "");
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const sel = tasks.find((t) => t.id === selected) ?? tasks[0];
+  const currentStatus = sel?.status;
 
   function handleStatusClick(val: string) {
-    if (val === currentStatus) return;
+    if (!sel || val === currentStatus) return;
     setAuthModal({ taskId: sel.id, targetStatus: val });
     setAuthUser(""); setAuthPass(""); setAuthError("");
   }
 
-  function confirmAuth(e: React.FormEvent) {
+  // 1) el supervisor (dueño de la pastelería) se valida en el backend, 2) se actualiza el pedido
+  async function confirmAuth(e: React.FormEvent) {
     e.preventDefault();
     if (!authModal) return;
-    if (authUser === BAKERY_CREDENTIALS.user && authPass === BAKERY_CREDENTIALS.password) {
-      setStatuses(prev => ({ ...prev, [authModal.taskId]: authModal.targetStatus }));
+    const task = tasks.find((t) => t.id === authModal.taskId);
+    if (!task) return;
+    setAuthBusy(true);
+    try {
+      await api("/users/authorize-supervisor", { method: "POST", body: { email: authUser.trim(), password: authPass } });
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "Usuario o contraseña incorrectos.");
+      setAuthBusy(false);
+      return;
+    }
+    try {
+      await api("/orders/" + task.dbId, { method: "PUT", body: { status: UI_TO_DB[authModal.targetStatus as UiStatus] } });
+      setTasks((prev) => prev.map((t) => t.id === task.id ? { ...t, status: authModal.targetStatus } : t));
       setAuthModal(null);
-    } else {
-      setAuthError("Usuario o contraseña incorrectos.");
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "No se pudo actualizar el pedido.");
+    } finally {
+      setAuthBusy(false);
     }
   }
-
   function getStatusBadge(s: string) {
     if (s === "progress") return <span className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full badge-progress"><ChefHat size={10} /> En proceso</span>;
     if (s === "ready")    return <span className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full badge-ready"><CheckCircle2 size={10} /> Listo</span>;
     return <span className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full badge-pending"><Clock size={10} /> Pendiente</span>;
+  }
+
+  if (!sel) {
+    return (
+      <div className="p-6 max-w-6xl mx-auto">
+        <h1 className="font-display text-3xl font-semibold text-foreground">Mis pedidos</h1>
+        {error && <div className="mt-4 bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
+        <p className="text-sm text-muted-foreground mt-2">{loading ? "Cargando pedidos..." : "No tienes pedidos asignados por ahora."}</p>
+      </div>
+    );
   }
 
   return (
@@ -63,7 +109,7 @@ export default function EmployeeTasks() {
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* Task list */}
         <div className="lg:col-span-2 space-y-3">
-          {TASKS.map((task) => (
+          {tasks.map((task) => (
             <button key={task.id} onClick={() => setSelected(task.id)}
               className={`w-full text-left p-4 rounded-3xl border-2 transition-all ${selected === task.id ? "border-indigo-400 bg-indigo-50" : "border-border bg-card hover:border-indigo-200 card-shadow"}`}>
               <div className="flex items-center gap-3">
@@ -74,7 +120,7 @@ export default function EmployeeTasks() {
                   <div className="font-bold text-sm text-foreground truncate">{task.cake}</div>
                   <div className="text-xs text-muted-foreground">{task.id} · {task.client} · {task.date}</div>
                 </div>
-                {getStatusBadge(statuses[task.id])}
+                {getStatusBadge(task.status)}
               </div>
             </button>
           ))}
@@ -201,17 +247,13 @@ export default function EmployeeTasks() {
                 <div className="bg-red-50 border border-red-200 text-red-600 text-xs font-semibold px-4 py-3 rounded-2xl">{authError}</div>
               )}
 
-              <p className="text-[11px] text-muted-foreground">
-                Demo: <span className="font-mono font-bold">dulceria@mail.com</span> / <span className="font-mono font-bold">demo123</span>
-              </p>
-
               <div className="flex gap-3 pt-1">
                 <button type="button" onClick={() => setAuthModal(null)}
                   className="flex-1 py-3 border-2 border-border text-foreground font-bold rounded-2xl hover:bg-muted transition-colors text-sm">
                   Cancelar
                 </button>
-                <button type="submit"
-                  className="flex-1 py-3 bg-gradient-to-r from-indigo-500 to-violet-500 text-white font-bold rounded-2xl shadow-md hover:shadow-lg transition-all text-sm flex items-center justify-center gap-2">
+                <button type="submit" disabled={authBusy}
+                  className="disabled:opacity-60 flex-1 py-3 bg-gradient-to-r from-indigo-500 to-violet-500 text-white font-bold rounded-2xl shadow-md hover:shadow-lg transition-all text-sm flex items-center justify-center gap-2">
                   <ChefHat size={14} /> Confirmar
                 </button>
               </div>

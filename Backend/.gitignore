@@ -13,3 +13,4 @@ pnpm-debug.log*
 # Archivos temporales del sistema operativo
 .DS_Store
 Thumbs.db
+uploads/
