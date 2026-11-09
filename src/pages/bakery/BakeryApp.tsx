@@ -12,16 +12,15 @@ import BakeryIncidents from "./BakeryIncidents";
 import BakeryProfile from "./BakeryProfile";
 import BakeryCategories from "../admin/AdminCategories";
 import BakeryPOS from "./BakeryPOS";
-import type { SharedRequest } from "../../App";
+import { useOrderCount } from "../../hooks/useOrderCount";
 
 interface Props {
   userName: string;
   onLogout: () => void;
-  customRequests: SharedRequest[];
-  onUpdateRequests: (reqs: SharedRequest[]) => void;
 }
 
-export default function BakeryApp({ userName, onLogout, customRequests, onUpdateRequests }: Props) {
+// 1. Quitamos customRequests y onUpdateRequests de los parámetros
+export default function BakeryApp({ userName, onLogout }: Props) {
   const [page, setPage] = useState("home");
 
   const pages: Record<string, React.ReactNode> = {
@@ -30,7 +29,7 @@ export default function BakeryApp({ userName, onLogout, customRequests, onUpdate
     "menu-mgmt": <MenuManagement />,
     "orders-cal": <OrdersCalendar />,
     "orders-mgmt": <OrdersManagement />,
-    "custom-requests": <CustomRequests customRequests={customRequests} onUpdateRequests={onUpdateRequests} />,
+    "custom-requests": <CustomRequests />,
     employees: <EmployeeManagement />,
     finances: <Finances />,
     subscription: <SubscriptionPage />,
@@ -39,7 +38,8 @@ export default function BakeryApp({ userName, onLogout, customRequests, onUpdate
     profile: <BakeryProfile userName={userName} onNavigate={setPage} />,
   };
 
-  const pendingCount = customRequests.filter(r => r.status === "pending").length;
+  // Solicitudes personalizadas pendientes de cotizar
+  const pendingCount = useOrderCount("type=custom&status=pending_quote"); 
 
   return (
     <Layout role="bakery" userName={userName} activePage={page} onNavigate={setPage} onLogout={onLogout} notifications={pendingCount}>

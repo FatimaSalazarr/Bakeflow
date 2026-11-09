@@ -6,6 +6,7 @@ import EmployeeCalendar from "./EmployeeCalendar";
 import EmployeeNotifications from "./EmployeeNotifications";
 import EmployeeProfile from "./EmployeeProfile";
 import EmployeePOS from "./EmployeePOS";
+import { useUnreadNotifications } from "../../hooks/useUnreadNotifications";
 
 interface Props {
   userName: string;
@@ -14,6 +15,7 @@ interface Props {
 
 export default function EmployeeApp({ userName, onLogout }: Props) {
   const [page, setPage] = useState("calendar");
+  const unread = useUnreadNotifications();
 
   const pages: Record<string, React.ReactNode> = {
     home: <EmployeeHome userName={userName} onNavigate={setPage} />,
@@ -25,7 +27,7 @@ export default function EmployeeApp({ userName, onLogout }: Props) {
   };
 
   return (
-    <Layout role="employee" userName={userName} activePage={page} onNavigate={setPage} onLogout={onLogout} notifications={2}>
+    <Layout role="employee" userName={userName} activePage={page} onNavigate={setPage} onLogout={onLogout} notifications={unread}>
       {pages[page] || pages["calendar"]}
     </Layout>
   );

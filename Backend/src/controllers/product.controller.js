@@ -1,4 +1,8 @@
 const Product = require('../models/Product.model');
+const Order = require('../models/Order.model');
+const { pick, canAccessBakery, forbidden, notFound, isCastError } = require('../utils/access');
+
+const PRODUCT_FIELDS = ['categoryId', 'name', 'description', 'price', 'imageUrl', 'sizes', 'flavors', 'stock', 'isAvailable'];
 
 exports.getProducts = async (req, res) => {
   try {
@@ -11,14 +15,19 @@ exports.getProducts = async (req, res) => {
       .populate('categoryId', 'name');
     res.json({ ok: true, products });
   } catch (error) {
+    if (isCastError(error)) return res.status(400).json({ ok: false, message: 'Filtro inválido' });
     res.status(500).json({ ok: false, message: 'Error al obtener el menú de pasteles' });
   }
 };
 
 exports.createProduct = async (req, res) => {
   try {
-    const bakeryId = req.body.bakeryId || req.user.bakeryId;
-    const product = await Product.create({ ...req.body, bakeryId });
+    // Una pastelería solo crea en la suya; el admin debe indicar cuál
+    const bakeryId = req.user.role === 'admin' ? req.body.bakeryId : req.user.bakeryId;
+    if (!bakeryId) {
+      return res.status(400).json({ ok: false, message: 'No hay pastelería asociada para crear el producto.' });
+    }
+    const product = await Product.create({ ...pick(req.body, PRODUCT_FIELDS), bakeryId });
     res.status(201).json({ ok: true, message: 'Pastel agregado al menú', product });
   } catch (error) {
     res.status(400).json({ ok: false, message: 'Error al crear producto', error: error.message });
@@ -27,7 +36,12 @@ exports.createProduct = async (req, res) => {
 
 exports.updateProduct = async (req, res) => {
   try {
-    const product = await Product.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const product = await Product.findById(req.params.id);
+    if (!product) return notFound(res, 'Producto no encontrado');
+    if (!canAccessBakery(req.user, product.bakeryId)) return forbidden(res);
+
+    product.set(pick(req.body, PRODUCT_FIELDS));
+    await product.save();
     res.json({ ok: true, message: 'Pastel actualizado', product });
   } catch (error) {
     res.status(400).json({ ok: false, message: 'Error al actualizar producto' });
@@ -36,9 +50,41 @@ exports.updateProduct = async (req, res) => {
 
 exports.deleteProduct = async (req, res) => {
   try {
-    await Product.findByIdAndDelete(req.params.id);
+    const product = await Product.findById(req.params.id);
+    if (!product) return notFound(res, 'Producto no encontrado');
+    if (!canAccessBakery(req.user, product.bakeryId)) return forbidden(res);
+
+    await product.deleteOne();
     res.json({ ok: true, message: 'Pastel eliminado del menú' });
   } catch (error) {
     res.status(500).json({ ok: false, message: 'Error al eliminar producto' });
+  }
+};
+
+// Más pedidos (por unidades vendidas en pedidos no cancelados). Si aún no hay ventas, devuelve los más recientes.
+exports.getPopularProducts = async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 6, 1), 20);
+    const ranking = await Order.aggregate([
+      { $match: { status: { $nin: ['cancelled', 'rejected', 'declined'] }, orderType: 'standard' } },
+      { $unwind: '$items' },
+      { $group: { _id: '$items.productId', sold: { $sum: '$items.quantity' } } },
+      { $sort: { sold: -1 } },
+      { $limit: 50 }
+    ]);
+    const soldById = Object.fromEntries(ranking.map((r) => [String(r._id), r.sold]));
+    let products = await Product.find({ _id: { $in: ranking.map((r) => r._id) }, isAvailable: true })
+      .populate('bakeryId', 'name').populate('categoryId', 'name');
+    products = products.sort((a, b) => soldById[String(b._id)] - soldById[String(a._id)]).slice(0, limit);
+
+    if (products.length < limit) {
+      const extra = await Product.find({ isAvailable: true, _id: { $nin: products.map((p) => p._id) } })
+        .sort({ createdAt: -1 }).limit(limit - products.length)
+        .populate('bakeryId', 'name').populate('categoryId', 'name');
+      products = products.concat(extra);
+    }
+    res.json({ ok: true, products: products.map((p) => ({ ...p.toObject(), sold: soldById[String(p._id)] || 0 })) });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: 'Error al obtener los productos populares' });
   }
 };

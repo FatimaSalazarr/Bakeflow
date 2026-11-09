@@ -1,58 +1,64 @@
+import { useState, useEffect } from "react";
+import { api } from "../../services/api";
 import { Store, Users, Star, DollarSign, BarChart2, CreditCard, ArrowRight, TrendingUp, AlertTriangle } from "lucide-react";
 
 interface Props { onNavigate: (page: string) => void; }
 
-const REVENUE_DATA = [
-  { month: "Abr", value: 31200 },
-  { month: "May", value: 35800 },
-  { month: "Jun", value: 38100 },
-  { month: "Jul", value: 36500 },
-  { month: "Ago", value: 40900 },
-  { month: "Sep", value: 42180 },
-];
+interface Overview {
+  totals: {
+    bakeries: number; newBakeriesThisMonth: number; users: number; newUsersThisWeek: number; activeSubscriptions: number; paidSubscriptions: number;
+    mrr: number; monthRevenue: number; revenueChangePct: number | null; incidentsThisMonth: number; incidentsResolvedThisMonth: number;
+  };
+  revenueByMonth: { month: string; value: number }[];
+  bakeryGrowth: { month: string; value: number }[];
+  subscriptionsByPlan: { plan: string; label: string; count: number }[];
+  recentBakeries: { id: string; name: string; plan: string; status: string; location: string; createdAt: string }[];
+}
 
-const SUBS_DATA = [
-  { label: "Premium", count: 78, color: "bg-amber-400" },
-  { label: "Pro", count: 111, color: "bg-violet-400" },
-  { label: "Gratuito", count: 59, color: "bg-pink-300" },
-];
-
-const BAKERY_GROWTH = [
-  { month: "Abr", value: 210 },
-  { month: "May", value: 218 },
-  { month: "Jun", value: 224 },
-  { month: "Jul", value: 231 },
-  { month: "Ago", value: 239 },
-  { month: "Sep", value: 248 },
-];
-
-const maxRevenue = Math.max(...REVENUE_DATA.map((d) => d.value));
-const maxBakeries = Math.max(...BAKERY_GROWTH.map((d) => d.value));
-const minBakeries = Math.min(...BAKERY_GROWTH.map((d) => d.value));
-const subsTotal = SUBS_DATA.reduce((s, d) => s + d.count, 0);
-
+const PLAN_COLOR: Record<string, string> = { enterprise: "bg-amber-400", pro: "bg-violet-400", basic: "bg-pink-300" };
+const EMPTY: Overview = {
+  totals: { bakeries: 0, newBakeriesThisMonth: 0, users: 0, newUsersThisWeek: 0, activeSubscriptions: 0, paidSubscriptions: 0, mrr: 0, monthRevenue: 0, revenueChangePct: null, incidentsThisMonth: 0, incidentsResolvedThisMonth: 0 },
+  revenueByMonth: [], bakeryGrowth: [], subscriptionsByPlan: [], recentBakeries: [],
+};
 export default function AdminHome({ onNavigate }: Props) {
+  const [data, setData] = useState<Overview>(EMPTY);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    api<Overview & { ok: boolean }>("/admin/overview").then(setData).catch((e) => setError(e.message));
+  }, []);
+
+  const T = data.totals;
+  const REVENUE_DATA = data.revenueByMonth;
+  const BAKERY_GROWTH = data.bakeryGrowth;
+  const SUBS_DATA = data.subscriptionsByPlan.map((s) => ({ label: s.label, count: s.count, color: PLAN_COLOR[s.plan] }));
+  const maxRevenue = Math.max(1, ...REVENUE_DATA.map((d) => d.value));
+  const maxBakeries = Math.max(1, ...BAKERY_GROWTH.map((d) => d.value));
+  const minBakeries = Math.min(...BAKERY_GROWTH.map((d) => d.value), maxBakeries);
+  const subsTotal = SUBS_DATA.reduce((s, d) => s + d.count, 0);
+  const monthName = new Date().toLocaleDateString("es-MX", { month: "long", year: "numeric" });
+  const paidPct = T.activeSubscriptions ? Math.round((T.paidSubscriptions / T.activeSubscriptions) * 100) : 0;
+
   const stats = [
-    { label: "Pastelerías registradas", value: "248", sub: "+12 este mes", Icon: Store, color: "bg-pink-500" },
-    { label: "Usuarios totales", value: "4,821", sub: "+89 esta semana", Icon: Users, color: "bg-violet-500" },
-    { label: "Suscripciones activas", value: "189", sub: "76% Pro o Premium", Icon: Star, color: "bg-amber-400" },
-    { label: "Ingresos mensuales", value: "$42,180", sub: "+18% vs agosto", Icon: DollarSign, color: "bg-indigo-500" },
-    { label: "Incidencias del mes", value: "12", sub: "8 resueltas", Icon: AlertTriangle, color: "bg-rose-500" },
+    { label: "Pastelerías registradas", value: String(T.bakeries), sub: `+${T.newBakeriesThisMonth} este mes`, Icon: Store, color: "bg-pink-500" },
+    { label: "Usuarios totales", value: T.users.toLocaleString(), sub: `+${T.newUsersThisWeek} esta semana`, Icon: Users, color: "bg-violet-500" },
+    { label: "Suscripciones activas", value: String(T.activeSubscriptions), sub: `${paidPct}% Pro o Premium`, Icon: Star, color: "bg-amber-400" },
+    { label: "Ingresos del mes", value: `$${Math.round(T.monthRevenue).toLocaleString()}`, sub: T.revenueChangePct === null ? "Comisiones + suscripciones" : `${T.revenueChangePct >= 0 ? "+" : ""}${T.revenueChangePct}% vs mes anterior`, Icon: DollarSign, color: "bg-indigo-500" },
+    { label: "Incidencias del mes", value: String(T.incidentsThisMonth), sub: `${T.incidentsResolvedThisMonth} resueltas`, Icon: AlertTriangle, color: "bg-rose-500" },
   ];
 
-  const recent = [
-    { name: "Dulcería Rosita", plan: "Pro", status: "active", location: "CDMX", date: "8 Sep" },
-    { name: "Pastelería Luna", plan: "Premium", status: "active", location: "Guadalajara", date: "6 Sep" },
-    { name: "Sweet Dreams", plan: "Gratuito", status: "suspended", location: "Monterrey", date: "4 Sep" },
-    { name: "Cakes & More", plan: "Pro", status: "active", location: "Puebla", date: "3 Sep" },
-  ];
-
+  const recent = data.recentBakeries.map((b) => ({
+    name: b.name, plan: b.plan, status: b.status, location: b.location || "—",
+    date: new Date(b.createdAt).toLocaleDateString("es-MX", { day: "numeric", month: "short" }),
+  }));
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-8">
       <div>
         <h1 className="font-display text-3xl font-semibold text-foreground">Panel BakeFlow</h1>
-        <p className="text-muted-foreground mt-1 font-medium">Resumen general de la plataforma — Septiembre 2026</p>
+        <p className="text-muted-foreground mt-1 font-medium">Resumen general de la plataforma — {monthName}</p>
       </div>
+
+      {error && <div className="bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
@@ -121,7 +127,7 @@ export default function AdminHome({ onNavigate }: Props) {
           <p className="text-xs text-muted-foreground font-medium mb-5">Distribución por plan</p>
           <div className="space-y-4">
             {SUBS_DATA.map((s) => {
-              const pct = Math.round((s.count / subsTotal) * 100);
+              const pct = Math.round((s.count / (subsTotal || 1)) * 100);
               return (
                 <div key={s.label}>
                   <div className="flex items-center justify-between mb-1.5">

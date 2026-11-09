@@ -32,6 +32,21 @@ const userSchema = new mongoose.Schema({
     trim: true,
     default: ''
   },
+  address: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  birthday: {
+    type: Date,
+    default: null
+  },
+  // Puesto del empleado dentro de la pastelería (Pastelera, Decoradora, ...)
+  jobTitle: { type: String, trim: true, default: '' },
+  profilePhoto: {
+    type: String,
+    default: ''
+  },
   role: {
     type: String,
     enum: ['customer', 'bakery', 'employee', 'admin'],

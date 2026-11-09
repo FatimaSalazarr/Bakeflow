@@ -1,33 +1,56 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { api, getStoredUser } from "../../services/api";
 import { Tag, Plus, Cake, Cookie, Coffee, Star, Gift, Heart } from "lucide-react";
 
 const ICON_MAP: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   Cake, Cookie, Coffee, Star, Gift, Heart, Tag,
 };
 
-const INITIAL_CATEGORIES = [
-  { id: 1, name: "Pasteles", icon: "Cake", products: 145, active: true },
-  { id: 2, name: "Cupcakes", icon: "Cookie", products: 89, active: true },
-  { id: 3, name: "Cheesecakes", icon: "Coffee", products: 52, active: true },
-  { id: 4, name: "Pasteles especiales", icon: "Star", products: 38, active: true },
-  { id: 5, name: "Repostería tradicional", icon: "Gift", products: 21, active: false },
-];
+interface CategoryRow { id: string; name: string; icon: string; products: number; active: boolean; }
 
+function toRow(c: any): CategoryRow {
+  return { id: c._id, name: c.name, icon: c.icon || "Cake", products: c.productsCount || 0, active: c.isActive };
+}
+
+// Esta pantalla también se muestra a las pastelerías (solo lectura): solo el admin puede modificar
 export default function AdminCategories() {
-  const [categories, setCategories] = useState(INITIAL_CATEGORIES);
+  const isAdmin = getStoredUser()?.role === "admin";
+  const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [newName, setNewName] = useState("");
   const [newIcon, setNewIcon] = useState("Cake");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  function add() {
-    if (!newName) return;
-    setCategories((prev) => [...prev, { id: Date.now(), name: newName, icon: newIcon, products: 0, active: true }]);
-    setNewName(""); setNewIcon("Cake");
+  useEffect(() => {
+    api<{ categories: any[] }>("/categories")
+      .then(({ categories }) => setCategories(categories.map(toRow)))
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function add() {
+    if (!newName.trim()) return;
+    setError("");
+    try {
+      const { category } = await api<{ category: any }>("/categories", { method: "POST", body: { name: newName.trim(), icon: newIcon } });
+      setCategories((prev) => [...prev, toRow(category)]);
+      setNewName(""); setNewIcon("Cake");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo crear la categoría.");
+    }
   }
 
-  function toggle(id: number) {
-    setCategories((prev) => prev.map((c) => c.id === id ? { ...c, active: !c.active } : c));
+  async function toggle(id: string) {
+    const cat = categories.find((c) => c.id === id);
+    if (!cat) return;
+    setError("");
+    try {
+      await api(`/categories/${id}`, { method: "PUT", body: { isActive: !cat.active } });
+      setCategories((prev) => prev.map((c) => c.id === id ? { ...c, active: !c.active } : c));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo actualizar la categoría.");
+    }
   }
-
   return (
     <div className="p-6 max-w-3xl mx-auto">
       <div className="mb-6">
@@ -37,7 +60,10 @@ export default function AdminCategories() {
         <p className="text-muted-foreground text-sm mt-1 font-medium">Gestiona las categorías de productos de la plataforma</p>
       </div>
 
-      <div className="bg-card rounded-3xl card-shadow border border-border p-5 mb-6">
+      {error && <div className="mb-4 bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
+      {loading && <p className="mb-4 text-sm text-muted-foreground">Cargando categorías...</p>}
+
+      {isAdmin && <div className="bg-card rounded-3xl card-shadow border border-border p-5 mb-6">
         <h2 className="font-bold text-foreground mb-4">Nueva categoría</h2>
         <div className="flex gap-3 items-center">
           <select value={newIcon} onChange={(e) => setNewIcon(e.target.value)}
@@ -51,7 +77,7 @@ export default function AdminCategories() {
             <Plus size={14} /> Agregar
           </button>
         </div>
-      </div>
+      </div>}
 
       <div className="space-y-3">
         {categories.map((c) => {
@@ -68,10 +94,10 @@ export default function AdminCategories() {
               <span className={`text-xs font-bold px-2 py-1 rounded-full ${c.active ? "badge-ready" : "bg-muted text-muted-foreground"}`}>
                 {c.active ? "Activa" : "Inactiva"}
               </span>
-              <button onClick={() => toggle(c.id)}
+              {isAdmin && <button onClick={() => toggle(c.id)}
                 className={`px-3 py-2 rounded-xl text-xs font-bold transition-colors ${c.active ? "bg-amber-50 text-amber-600 hover:bg-amber-100" : "bg-green-50 text-green-600 hover:bg-green-100"}`}>
                 {c.active ? "Pausar" : "Activar"}
-              </button>
+              </button>}
             </div>
           );
         })}

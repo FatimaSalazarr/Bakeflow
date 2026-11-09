@@ -1,19 +1,33 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { api } from "../../services/api";
 import { Search, Store, MapPin, X, Trash2, Play, Pause, Lock, AlertTriangle } from "lucide-react";
 
-const BAKERIES = [
-  { id: 1, name: "Dulcería Rosita", owner: "Rosa Martínez", email: "dulceria@rosita.com", location: "CDMX", plan: "Pro", status: "active", orders: 34, date: "8 Sep 2026" },
-  { id: 2, name: "Pastelería Luna", owner: "Valentina Ríos", email: "luna@pasteles.com", location: "Guadalajara", plan: "Premium", status: "active", orders: 67, date: "6 Sep 2026" },
-  { id: 3, name: "Sweet Dreams", owner: "Karen Torres", email: "karen@sweet.com", location: "Monterrey", plan: "Gratuito", status: "suspended", orders: 8, date: "4 Sep 2026" },
-  { id: 4, name: "Cakes & More", owner: "Patricia Vega", email: "patricia@cakes.com", location: "Puebla", plan: "Pro", status: "active", orders: 22, date: "3 Sep 2026" },
-  { id: 5, name: "Pastel Kawaii", owner: "Mia Flores", email: "mia@kawaii.com", location: "Tijuana", plan: "Premium", status: "active", orders: 51, date: "1 Sep 2026" },
-];
+interface BakeryRow { id: string; name: string; owner: string; email: string; location: string; plan: string; status: string; orders: number; date: string; }
 
+const PLAN_LABEL: Record<string, string> = { basic: "Gratuito", pro: "Pro", enterprise: "Premium" };
+
+function toRow(b: any): BakeryRow {
+  return {
+    id: b._id, name: b.name, owner: b.ownerId?.name || "—", email: b.ownerId?.email || "—", location: b.address || "—",
+    plan: PLAN_LABEL[b.subscription?.plan] || "Gratuito", status: b.status, orders: b.ordersCount || 0,
+    date: new Date(b.createdAt).toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" }),
+  };
+}
 export default function AdminBakeries() {
-  const [bakeries, setBakeries] = useState(BAKERIES);
+  const [bakeries, setBakeries] = useState<BakeryRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    api<{ bakeries: any[] }>("/bakeries?all=true")
+      .then(({ bakeries }) => setBakeries(bakeries.map(toRow)))
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
-  const [selected, setSelected] = useState<typeof BAKERIES[0] | null>(null);
+  const [selected, setSelected] = useState<BakeryRow | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteCredentials, setDeleteCredentials] = useState({ user: "", password: "" });
   const [deleteError, setDeleteError] = useState("");
@@ -24,29 +38,43 @@ export default function AdminBakeries() {
     return matchSearch && matchFilter;
   });
 
-  function toggleStatus(id: number) {
-    setBakeries((prev) => prev.map((b) => b.id === id ? { ...b, status: b.status === "active" ? "suspended" : "active" } : b));
-    setSelected((prev) => prev ? { ...prev, status: prev.status === "active" ? "suspended" : "active" } : null);
+  // Suspender una pastelería le impide recibir pedidos nuevos
+  async function toggleStatus(id: string) {
+    const bakery = bakeries.find((b) => b.id === id);
+    if (!bakery) return;
+    const status = bakery.status === "active" ? "suspended" : "active";
+    setError("");
+    try {
+      await api(`/bakeries/${id}`, { method: "PUT", body: { status } });
+      setBakeries((prev) => prev.map((b) => b.id === id ? { ...b, status } : b));
+      setSelected((prev) => prev ? { ...prev, status } : null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo cambiar el estado.");
+    }
   }
-
   function openDeleteModal() {
     setDeleteCredentials({ user: "", password: "" });
     setDeleteError("");
     setShowDeleteModal(true);
   }
 
-  function confirmDelete() {
-    if (deleteCredentials.user !== "admin" || deleteCredentials.password !== "admin123") {
-      setDeleteError("Credenciales incorrectas. Intenta de nuevo.");
-      return;
-    }
-    if (selected) {
+  // Reconfirma la identidad del admin en el servidor antes de borrar (elimina también menú y empleados)
+  async function confirmDelete() {
+    if (!selected) return;
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      await api("/users/verify-credentials", { method: "POST", body: { email: deleteCredentials.user, password: deleteCredentials.password } });
+      await api(`/bakeries/${selected.id}`, { method: "DELETE" });
       setBakeries((prev) => prev.filter((b) => b.id !== selected.id));
       setSelected(null);
+      setShowDeleteModal(false);
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : "No se pudo eliminar la pastelería.");
+    } finally {
+      setDeleting(false);
     }
-    setShowDeleteModal(false);
   }
-
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <div className="mb-6">
@@ -56,6 +84,8 @@ export default function AdminBakeries() {
         <p className="text-muted-foreground text-sm mt-1 font-medium">{bakeries.length} empresas registradas</p>
       </div>
 
+      {error && <div className="mb-4 bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
+      {loading && <p className="mb-4 text-sm text-muted-foreground">Cargando pastelerías...</p>}
       <div className="flex flex-wrap gap-3 mb-6">
         <div className="flex-1 min-w-48 relative">
           <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -167,9 +197,9 @@ export default function AdminBakeries() {
             </p>
             <div className="space-y-3 mb-4">
               <div>
-                <label className="text-xs font-bold text-foreground block mb-1.5">Usuario admin</label>
-                <input type="text" value={deleteCredentials.user} onChange={(e) => setDeleteCredentials((p) => ({ ...p, user: e.target.value }))}
-                  placeholder="admin" className="w-full px-4 py-2.5 rounded-2xl border-2 border-border bg-muted focus:outline-none focus:border-pink-400 text-sm font-medium" />
+                <label className="text-xs font-bold text-foreground block mb-1.5">Correo del administrador</label>
+                <input type="email" value={deleteCredentials.user} onChange={(e) => setDeleteCredentials((p) => ({ ...p, user: e.target.value }))}
+                  placeholder="admin@correo.com" className="w-full px-4 py-2.5 rounded-2xl border-2 border-border bg-muted focus:outline-none focus:border-pink-400 text-sm font-medium" />
               </div>
               <div>
                 <label className="text-xs font-bold text-foreground block mb-1.5 flex items-center gap-1.5">
@@ -186,7 +216,7 @@ export default function AdminBakeries() {
               <button onClick={() => setShowDeleteModal(false)} className="flex-1 py-3 border-2 border-border text-foreground font-bold rounded-2xl hover:bg-muted text-sm">
                 Cancelar
               </button>
-              <button onClick={confirmDelete} className="flex-1 py-3 bg-red-500 hover:bg-red-600 text-white font-bold rounded-2xl text-sm transition-colors">
+              <button onClick={confirmDelete} disabled={deleting} className="disabled:opacity-60 flex-1 py-3 bg-red-500 hover:bg-red-600 text-white font-bold rounded-2xl text-sm transition-colors">
                 Eliminar
               </button>
             </div>

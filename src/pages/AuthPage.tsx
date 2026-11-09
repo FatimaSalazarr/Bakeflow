@@ -2,19 +2,18 @@ import { useState, useRef } from "react";
 import { Store, User, ShoppingBag, Eye, EyeOff, ArrowRight, Sparkles, Cake, Package, Phone, MapPin, ImagePlus, X, Calendar } from "lucide-react";
 import Logo from "../components/Logo";
 import newLogoImg from "@/imports/0d72255c-5f7a-9c92-b256-12eb6a4e2091.jpeg";
-
-type Role = "customer" | "bakery" | "employee" | "admin";
+import { loginUser, registerUser, type Role } from "./authService";
+import { api, uploadImage } from "../services/api";
 
 interface AuthPageProps {
   onLogin: (role: Role, name: string) => void;
 }
-
 const DEMO_ACCOUNTS = [
   { role: "customer" as Role, email: "luna@mail.com", password: "demo123", name: "Luna García", label: "Cliente", Icon: ShoppingBag, color: "from-pink-400 to-rose-400" },
   { role: "bakery" as Role, email: "dulceria@mail.com", password: "demo123", name: "Dulcería Rosita", label: "Pastelería", Icon: Store, color: "from-violet-400 to-pink-400" },
   { role: "employee" as Role, email: "sofia@mail.com", password: "demo123", name: "Sofía López", label: "Empleado", Icon: User, color: "from-indigo-400 to-violet-400" },
   { role: "admin" as Role, email: "admin@bakeflow.com", password: "demo123", name: "Admin BakeFlow", label: "Admin", Icon: Sparkles, color: "from-rose-400 to-pink-400" },
-];
+]
 
 const FEATURES = [
   { Icon: Cake, text: "Gestiona tu menú y catálogo de pasteles" },
@@ -29,6 +28,7 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
   const [showPw, setShowPw] = useState(false);
   const [role, setRole] = useState<Role>("customer");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const [regForm, setRegForm] = useState({
     name: "", bakeryName: "", email: "", password: "",
@@ -36,29 +36,59 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
   });
   const [showRegPw, setShowRegPw] = useState(false);
   const [profilePhoto, setProfilePhoto] = useState("");
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
   const photoRef = useRef<HTMLInputElement>(null);
 
+  // La foto se sube al servidor justo después de crear la cuenta (antes no hay sesión); aquí solo se previsualiza
   function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => setProfilePhoto(ev.target?.result as string);
-    reader.readAsDataURL(file);
+    if (!file.type.startsWith("image/") || file.size > 5 * 1024 * 1024) { setError("La foto debe ser una imagen de máximo 5 MB."); return; }
+    setPhotoFile(file);
+    setProfilePhoto(URL.createObjectURL(file));
   }
-
-  function handleLogin(e: React.FormEvent) {
+  async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
-    const account = DEMO_ACCOUNTS.find((a) => a.email === email && a.password === password);
-    if (account) {
-      onLogin(account.role, account.name);
-    } else {
-      setError("Correo o contraseña incorrectos. Usa las cuentas demo.");
+    setError("");
+    setLoading(true);
+    try {
+      const { user } = await loginUser(email.trim(), password);
+      onLogin(user.role, user.name);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo iniciar sesión.");
+    } finally {
+      setLoading(false);
     }
   }
 
-  function handleRegister(e: React.FormEvent) {
+  async function handleRegister(e: React.FormEvent) {
     e.preventDefault();
     if (!regForm.name || !regForm.email || !regForm.password) { setError("Por favor completa los campos obligatorios."); return; }
-    onLogin(role, role === "bakery" ? regForm.bakeryName || regForm.name : regForm.name);
+    if (regForm.password.length < 6) { setError("La contraseña debe tener mínimo 6 caracteres."); return; }
+    setError("");
+    setLoading(true);
+    try {
+      const { user } = await registerUser({
+        name: regForm.name.trim(),
+        email: regForm.email.trim(),
+        password: regForm.password,
+        role,
+        phone: regForm.phone || undefined,
+        address: regForm.address || undefined,
+        birthday: regForm.birthday || undefined,
+        bakeryName: role === "bakery" ? regForm.bakeryName.trim() || undefined : undefined,
+      });
+      if (photoFile) {
+        try {
+          const url = await uploadImage(photoFile);
+          await api("/users/profile", { method: "PUT", body: { profilePhoto: url } });
+        } catch { /* la cuenta ya existe; la foto se puede subir después desde el perfil */ }
+      }
+      onLogin(user.role, role === "bakery" ? regForm.bakeryName || user.name : user.name);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo crear la cuenta.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   function fillDemo(acc: typeof DEMO_ACCOUNTS[0]) {
@@ -167,9 +197,9 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
               {error && (
                 <div className="bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>
               )}
-              <button type="submit"
-                className="w-full py-3.5 bg-gradient-to-r from-pink-500 to-pink-600 text-white font-bold rounded-2xl btn-glow flex items-center justify-center gap-2 text-sm">
-                Entrar <ArrowRight size={16} />
+              <button type="submit" disabled={loading}
+                className="w-full py-3.5 bg-gradient-to-r from-pink-500 to-pink-600 text-white font-bold rounded-2xl btn-glow flex items-center justify-center gap-2 text-sm disabled:opacity-60">
+                {loading ? "Entrando..." : <>Entrar <ArrowRight size={16} /></>}
               </button>
 
               <div className="pt-4 border-t border-border">
@@ -224,7 +254,7 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
                   {profilePhoto ? (
                     <div className="relative shrink-0">
                       <img src={profilePhoto} alt="Perfil" className="w-16 h-16 rounded-2xl object-cover border-2 border-pink-200" />
-                      <button type="button" onClick={() => setProfilePhoto("")}
+                      <button type="button" onClick={() => { setProfilePhoto(""); setPhotoFile(null); }}
                         className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-400 text-white rounded-full flex items-center justify-center">
                         <X size={10} />
                       </button>
@@ -300,7 +330,7 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
                 <label className="block text-sm font-bold text-foreground mb-1.5">Contraseña <span className="text-pink-500">*</span></label>
                 <div className="relative">
                   <input type={showRegPw ? "text" : "password"} value={regForm.password} onChange={(e) => setReg("password", e.target.value)}
-                    placeholder="Mínimo 8 caracteres" className="input-base pr-12" />
+                    placeholder="Mínimo 6 caracteres" className="input-base pr-12" />
                   <button type="button" onClick={() => setShowRegPw(!showRegPw)}
                     className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                     {showRegPw ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -311,9 +341,9 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
               {error && (
                 <div className="bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>
               )}
-              <button type="submit"
-                className="w-full py-3.5 bg-pink-500 hover:bg-pink-600 text-white font-bold rounded-2xl flex items-center justify-center gap-2 text-sm transition-colors">
-                Crear cuenta <ArrowRight size={16} />
+              <button type="submit" disabled={loading}
+                className="w-full py-3.5 bg-pink-500 hover:bg-pink-600 text-white font-bold rounded-2xl flex items-center justify-center gap-2 text-sm transition-colors disabled:opacity-60">
+                {loading ? "Creando cuenta..." : <>Crear cuenta <ArrowRight size={16} /></>}
               </button>
             </form>
           )}
@@ -322,3 +352,5 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
     </div>
   );
 }
+
+

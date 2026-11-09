@@ -1,5 +1,7 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User.model');
+const Bakery = require('../models/Bakery.model');
+const { getSettings } = require('../utils/settings');
 
 // Generar JWT firmado
 const signToken = (user) => {
@@ -13,7 +15,8 @@ const signToken = (user) => {
 // 1. Registro de usuario
 exports.register = async (req, res) => {
   try {
-    const { name, email, password, phone, role } = req.body;
+    const { name, password, phone, address, birthday, profilePhoto, bakeryName, role } = req.body;
+    const email = String(req.body.email).trim().toLowerCase();
 
     const existingUser = await User.findOne({ email });
     if (existingUser) {
@@ -28,8 +31,32 @@ exports.register = async (req, res) => {
       email,
       password,
       phone,
+      address,
+      birthday: birthday || null,
+      profilePhoto,
       role: safeRole
     });
+
+    // Si se registra una pastelería, se crea su registro y se enlaza al dueño
+    if (safeRole === 'bakery') {
+      try {
+        const bakery = await Bakery.create({
+          name: bakeryName || name,
+          address: address || '',
+          phone: phone || '',
+          ownerId: newUser._id,
+          // Bono de bienvenida configurable por el admin: 1 mes de plan Pro gratis
+          ...((await getSettings()).welcomeBonus && {
+            subscription: { plan: 'pro', status: 'active', price: 0, expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) }
+          })
+        });
+        newUser.bakeryId = bakery._id;
+        await newUser.save();
+      } catch (bakeryError) {
+        await User.findByIdAndDelete(newUser._id);
+        throw bakeryError;
+      }
+    }
 
     const token = signToken(newUser);
 
@@ -46,14 +73,15 @@ exports.register = async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ ok: false, message: 'Error al registrar usuario', error: error.message });
+    res.status(500).json({ ok: false, message: 'Error al registrar usuario' });
   }
 };
 
 // 2. Iniciar sesión (Login)
 exports.login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const email = String(req.body.email).trim().toLowerCase();
+    const { password } = req.body;
 
     // Buscamos el usuario e incluimos el password para compararlo
     const user = await User.findOne({ email }).select('+password');
@@ -85,7 +113,7 @@ exports.login = async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ ok: false, message: 'Error al iniciar sesión', error: error.message });
+    res.status(500).json({ ok: false, message: 'Error al iniciar sesión' });
   }
 };
 

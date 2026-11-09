@@ -12,7 +12,7 @@ const bakerySchema = new mongoose.Schema({
   subscription: {
     plan: { type: String, enum: ['basic', 'pro', 'enterprise'], default: 'basic' },
     status: { type: String, enum: ['active', 'expired', 'cancelled'], default: 'active' },
-    price: { type: Number, default: 299 },
+    price: { type: Number, default: 0 },
     expiresAt: { type: Date, default: () => new Date(+new Date() + 30*24*60*60*1000) }
   },
   commissionRate: { type: Number, default: 0.08 } // 8% comisión de BakeFlow
