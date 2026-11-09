@@ -9,7 +9,10 @@ const router = express.Router();
 
 // Las imágenes se guardan en Backend/uploads. Para producción con disco efímero (Render, Railway...)
 // basta con reemplazar este storage por S3/Cloudinary: el contrato (devolver { url }) no cambia.
-const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads');
+// En Vercel el sistema de archivos es de solo lectura salvo /tmp (y es temporal).
+const UPLOAD_DIR = process.env.VERCEL
+  ? path.join(require('os').tmpdir(), 'uploads')
+  : path.join(__dirname, '..', '..', 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const EXT = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' };
