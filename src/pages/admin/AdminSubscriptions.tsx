@@ -1,15 +1,20 @@
+import { useState, useEffect } from "react";
+import { api } from "../../services/api";
 import { CheckCircle2, Star, Crown, Flower2, DollarSign } from "lucide-react";
 
-const SUBS = [
-  { bakery: "Pastelería Luna", plan: "Premium", status: "active", end: "30 Sep 2026", amount: "$299" },
-  { bakery: "Dulcería Rosita", plan: "Pro", status: "active", end: "30 Sep 2026", amount: "$199" },
-  { bakery: "Pastel Kawaii", plan: "Premium", status: "active", end: "14 Sep 2026", amount: "$299" },
-  { bakery: "Cakes & More", plan: "Pro", status: "active", end: "30 Sep 2026", amount: "$199" },
-  { bakery: "Sweet Dreams", plan: "Gratuito", status: "active", end: "-", amount: "$0" },
-  { bakery: "Boulangerie MX", plan: "Pro", status: "cancelled", end: "31 Ago 2026", amount: "$199" },
-  { bakery: "La Dulce Vida", plan: "Premium", status: "expired", end: "31 Jul 2026", amount: "$299" },
-];
+interface SubRow { bakery: string; plan: string; status: string; end: string; amount: string; price: number; }
 
+const PLAN_LABEL: Record<string, string> = { basic: "Gratuito", pro: "Pro", enterprise: "Premium" };
+
+function toRow(b: any): SubRow {
+  const s = b.subscription || {};
+  const price = s.price || 0;
+  return {
+    bakery: b.name, plan: PLAN_LABEL[s.plan] || "Gratuito", status: s.status || "active", price,
+    end: s.expiresAt ? new Date(s.expiresAt).toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" }) : "-",
+    amount: `$${price}`,
+  };
+}
 const STATUS_MAP: Record<string, { label: string; class: string }> = {
   active: { label: "Activa", class: "badge-ready" },
   cancelled: { label: "Cancelada", class: "badge-cancelled" },
@@ -21,11 +26,21 @@ const PLAN_ICON: Record<string, React.ComponentType<{ size?: number; className?:
 };
 
 export default function AdminSubscriptions() {
+  const [SUBS, setSubs] = useState<SubRow[]>([]);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api<{ bakeries: any[] }>("/bakeries?all=true")
+      .then(({ bakeries }) => setSubs(bakeries.map(toRow)))
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
   const active = SUBS.filter((s) => s.status === "active").length;
   const pro = SUBS.filter((s) => s.plan === "Pro" && s.status === "active").length;
   const premium = SUBS.filter((s) => s.plan === "Premium" && s.status === "active").length;
-  const mrr = SUBS.filter((s) => s.status === "active").reduce((sum, s) => sum + parseInt(s.amount.replace(/\$|,/g, "")), 0);
-
+  const mrr = SUBS.filter((s) => s.status === "active").reduce((sum, s) => sum + s.price, 0);
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="mb-6">
@@ -33,6 +48,8 @@ export default function AdminSubscriptions() {
         <p className="text-muted-foreground text-sm mt-1 font-medium">Estado de los planes de todas las pastelerías</p>
       </div>
 
+      {error && <div className="mb-5 bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
+      {loading && <p className="mb-5 text-sm text-muted-foreground">Cargando suscripciones...</p>}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
         {[
           { label: "Activas", value: active, Icon: CheckCircle2, color: "bg-pink-500" },

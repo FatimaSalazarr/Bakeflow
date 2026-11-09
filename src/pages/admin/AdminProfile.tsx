@@ -1,17 +1,24 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
+import { api, getStoredUser, uploadImage } from "../../services/api";
 import { Mail, Phone, User, Pencil, Check, Sparkles, ImagePlus, X, Store, Users, ShieldCheck, Lock, Eye, EyeOff } from "lucide-react";
 
 interface Props { userName: string; }
 
 export default function AdminProfile({ userName }: Props) {
   const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({
-    name: userName,
-    email: "admin@bakeflow.com",
-    phone: "+52 55 0000 1234",
-    role: "Administrador de plataforma",
-    department: "BakeFlow Operations",
-  });
+  const [form, setForm] = useState({ name: userName, email: "", phone: "" });
+  const [loadError, setLoadError] = useState("");
+  const [stats, setStats] = useState({ bakeries: 0, users: 0, resolved: 0 });
+
+  useEffect(() => {
+    Promise.all([api<{ user: any }>("/auth/me"), api<{ totals: any }>("/admin/overview")])
+      .then(([{ user }, { totals }]) => {
+        setForm({ name: user.name, email: user.email, phone: user.phone || "" });
+        setPhoto(user.profilePhoto || "");
+        setStats({ bakeries: totals.bakeries, users: totals.users, resolved: totals.incidentsResolvedThisMonth });
+      })
+      .catch((e) => setLoadError(e.message));
+  }, []);
   const [photo, setPhoto] = useState("");
   const [saved, setSaved] = useState(false);
   const photoRef = useRef<HTMLInputElement>(null);
@@ -21,36 +28,59 @@ export default function AdminProfile({ userName }: Props) {
   const [pwError, setPwError] = useState("");
   const [pwSaved, setPwSaved] = useState(false);
 
-  function changePassword(e: React.FormEvent) {
+  async function changePassword(e: React.FormEvent) {
     e.preventDefault();
-    if (pwForm.current !== "demo123") { setPwError("La contraseña actual es incorrecta."); return; }
     if (pwForm.next.length < 8) { setPwError("La nueva contraseña debe tener al menos 8 caracteres."); return; }
     if (pwForm.next !== pwForm.confirm) { setPwError("Las contraseñas no coinciden."); return; }
     setPwError("");
+    try {
+      await api("/users/password", { method: "PUT", body: { currentPassword: pwForm.current, newPassword: pwForm.next } });
+    } catch (err) {
+      setPwError(err instanceof Error ? err.message : "No se pudo cambiar la contraseña.");
+      return;
+    }
     setPwForm({ current: "", next: "", confirm: "" });
     setPwSaved(true);
     setTimeout(() => setPwSaved(false), 3000);
   }
 
-  function handlePhoto(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handlePhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => setPhoto(ev.target?.result as string);
-    reader.readAsDataURL(file);
+    setLoadError("");
+    try {
+      const url = await uploadImage(file);
+      await api("/users/profile", { method: "PUT", body: { profilePhoto: url } });
+      setPhoto(url);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "No se pudo subir la imagen.");
+    }
   }
 
-  function save() {
-    setEditing(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+  async function removePhoto() {
+    try {
+      await api("/users/profile", { method: "PUT", body: { profilePhoto: "" } });
+      setPhoto("");
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "No se pudo quitar la foto.");
+    }
+  }
+  async function save() {
+    setLoadError("");
+    try {
+      const { user } = await api<{ user: any }>("/users/profile", { method: "PUT", body: { name: form.name.trim(), phone: form.phone } });
+      localStorage.setItem("bakeflow_user", JSON.stringify({ ...getStoredUser(), name: user.name }));
+      setEditing(false);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "No se pudo guardar el perfil.");
+    }
   }
 
   const fields = [
     { key: "name",       label: "Nombre completo",    type: "text",  Icon: User },
     { key: "email",      label: "Correo electrónico", type: "email", Icon: Mail },
     { key: "phone",      label: "Teléfono",           type: "tel",   Icon: Phone },
-    { key: "role",       label: "Rol",                type: "text",  Icon: ShieldCheck },
-    { key: "department", label: "Área",               type: "text",  Icon: Sparkles },
   ];
 
   return (
@@ -63,9 +93,9 @@ export default function AdminProfile({ userName }: Props) {
       {/* Estadísticas movidas arriba */}
       <div className="grid grid-cols-3 gap-4 mb-5">
         {[
-          { label: "Pastelerías activas", value: "248", Icon: Store },
-          { label: "Usuarios totales", value: "4.8k", Icon: Users },
-          { label: "Incidencias resueltas", value: "32", Icon: ShieldCheck },
+          { label: "Pastelerías", value: String(stats.bakeries), Icon: Store },
+          { label: "Usuarios totales", value: String(stats.users), Icon: Users },
+          { label: "Incidencias resueltas (mes)", value: String(stats.resolved), Icon: ShieldCheck },
         ].map(({ label, value, Icon }) => (
           <div key={label} className="bg-card rounded-3xl card-shadow border border-border p-4 text-center">
             <div className="flex justify-center mb-1">
@@ -77,6 +107,7 @@ export default function AdminProfile({ userName }: Props) {
         ))}
       </div>
 
+      {loadError && <div className="mb-5 bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{loadError}</div>}
       {saved && (
         <div className="mb-5 bg-green-50 border border-green-200 text-green-700 px-5 py-3 rounded-2xl font-bold text-sm flex items-center gap-2">
           <Check size={16} /> Cambios guardados correctamente
@@ -90,7 +121,7 @@ export default function AdminProfile({ userName }: Props) {
               <div className="relative">
                 <img src={photo} alt="Perfil" className="w-20 h-20 rounded-3xl object-cover border-2 border-rose-200 shadow-md" />
                 {editing && (
-                  <button onClick={() => setPhoto("")}
+                  <button onClick={removePhoto}
                     className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-400 text-white rounded-full flex items-center justify-center">
                     <X size={10} />
                   </button>
@@ -144,7 +175,7 @@ export default function AdminProfile({ userName }: Props) {
                 <Icon size={13} className="text-rose-400" /> {label}
               </label>
               {editing ? (
-                <input type={type} value={form[key as keyof typeof form]}
+                <input type={type} disabled={key === "email"} value={form[key as keyof typeof form]}
                   onChange={(e) => setForm({ ...form, [key]: e.target.value })}
                   className="w-full px-4 py-3 rounded-2xl border-2 border-border bg-muted focus:outline-none focus:border-rose-400 transition-colors text-sm font-medium" />
               ) : (

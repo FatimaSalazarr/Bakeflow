@@ -1,3 +1,6 @@
+import { useState, useEffect } from "react";
+import { api } from "../../services/api";
+import { isDeadStatus, DB_TO_UI, orderCode, orderTitle, clientName, dateKeyOf } from "../../services/orders";
 import { Zap, CheckCircle2, Calendar, Package, Cake, Clock, ChefHat, ArrowRight } from "lucide-react";
 
 interface Props {
@@ -5,16 +8,38 @@ interface Props {
   onNavigate: (page: string) => void;
 }
 
-const MY_TASKS = [
-  { id: "#1043", cake: "Pastel de cumpleaños", client: "Carlos M.", date: "12 Sep", status: "progress" },
-  { id: "#1044", cake: "Cupcakes x24", client: "Andrea T.", date: "11 Sep", status: "progress" },
-  { id: "#1048", cake: "Cupcakes rainbow", client: "Roberto A.", date: "25 Sep", status: "pending" },
-];
+interface Task { id: string; cake: string; client: string; date: string; status: string; }
 
 export default function EmployeeHome({ userName, onNavigate }: Props) {
+  const [orders, setOrders] = useState<any[]>([]);
+  const [error, setError] = useState("");
+
+  // El backend ya devuelve solo los pedidos asignados a este empleado
+  useEffect(() => {
+    api<{ orders: any[] }>("/orders").then((r) => setOrders(r.orders)).catch((e) => setError(e.message));
+  }, []);
+
+  const today = new Date();
+  const startOfWeek = new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay());
+  const endOfWeek = new Date(startOfWeek.getFullYear(), startOfWeek.getMonth(), startOfWeek.getDate() + 7);
+  const sameDay = (iso: string) => dateKeyOf(iso) === dateKeyOf(today.toISOString());
+  const live = orders.filter((o) => !isDeadStatus(o.status) && o.status !== "delivered");
+
+  const MY_TASKS: Task[] = live.slice(0, 5).map((o) => ({
+    id: orderCode(o), cake: orderTitle(o), client: clientName(o),
+    date: new Date(o.deliveryDate).toLocaleDateString("es-MX", { day: "numeric", month: "short" }),
+    status: DB_TO_UI[o.status] || "pending",
+  }));
+  const statValues = {
+    active: live.filter((o) => o.status === "in_preparation").length,
+    doneToday: orders.filter((o) => (o.status === "ready" || o.status === "delivered") && sameDay(o.updatedAt)).length,
+    week: orders.filter((o) => { const d = new Date(o.deliveryDate); return d >= startOfWeek && d < endOfWeek; }).length,
+    upcoming: live.filter((o) => o.status === "pending" || o.status === "pending_quote").length,
+  };
+
   return (
     <div className="p-6 max-w-4xl mx-auto">
-      <div className="mb-8">
+      {error && <div className="mb-4 bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}      <div className="mb-8">
         <h1 className="font-display text-3xl font-semibold text-foreground">
           Hola, {userName.split(" ")[0]}!
         </h1>
@@ -23,10 +48,10 @@ export default function EmployeeHome({ userName, onNavigate }: Props) {
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
         {[
-          { label: "Tareas activas", value: "2", Icon: Zap, color: "from-pink-400 to-rose-400" },
-          { label: "Completadas hoy", value: "1", Icon: CheckCircle2, color: "from-green-400 to-emerald-400" },
-          { label: "Esta semana", value: "5", Icon: Calendar, color: "from-purple-400 to-pink-400" },
-          { label: "Próximas", value: "3", Icon: Package, color: "from-indigo-400 to-purple-400" },
+          { label: "Tareas activas", value: String(statValues.active), Icon: Zap, color: "from-pink-400 to-rose-400" },
+          { label: "Completadas hoy", value: String(statValues.doneToday), Icon: CheckCircle2, color: "from-green-400 to-emerald-400" },
+          { label: "Esta semana", value: String(statValues.week), Icon: Calendar, color: "from-purple-400 to-pink-400" },
+          { label: "Próximas", value: String(statValues.upcoming), Icon: Package, color: "from-indigo-400 to-purple-400" },
         ].map(({ label, value, Icon, color }) => (
           <div key={label} className="bg-card rounded-3xl card-shadow border border-border p-4 text-center">
             <div className={`w-10 h-10 bg-gradient-to-br ${color} rounded-2xl flex items-center justify-center mx-auto mb-2`}>
@@ -63,6 +88,7 @@ export default function EmployeeHome({ userName, onNavigate }: Props) {
           </button>
         </div>
         <div className="space-y-3">
+          {MY_TASKS.length === 0 && <p className="text-sm text-muted-foreground">No tienes pedidos activos.</p>}
           {MY_TASKS.map((task) => (
             <div key={task.id} className="bg-card rounded-3xl card-shadow border border-border p-4 flex items-center gap-4">
               <div className="w-12 h-12 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-2xl flex items-center justify-center shrink-0">

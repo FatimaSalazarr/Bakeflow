@@ -1,24 +1,51 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { api } from "../../services/api";
 import { Settings, CheckCircle2 } from "lucide-react";
 
+type Form = {
+  siteName: string; supportEmail: string; commissionRate: string; maxFreeOrders: string;
+  maintenanceMode: boolean; emailNotifications: boolean; autoRenew: boolean; welcomeBonus: boolean;
+};
+
 export default function AdminSettings() {
-  const [settings, setSettings] = useState({
-    siteName: "BakeFlow",
-    supportEmail: "soporte@bakeflow.com",
-    commissionRate: "5",
-    maxFreeOrders: "10",
-    maintenanceMode: false,
-    emailNotifications: true,
-    autoRenew: true,
-    welcomeBonus: true,
+  const [settings, setSettings] = useState<Form>({
+    siteName: "", supportEmail: "", commissionRate: "", maxFreeOrders: "",
+    maintenanceMode: false, emailNotifications: true, autoRenew: true, welcomeBonus: false,
   });
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
-  function save() {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+  useEffect(() => {
+    api<{ settings: any }>("/settings")
+      .then(({ settings: s }) => setSettings({
+        siteName: s.siteName, supportEmail: s.supportEmail, commissionRate: String(s.commissionRate), maxFreeOrders: String(s.maxFreeOrders),
+        maintenanceMode: s.maintenanceMode, emailNotifications: s.emailNotifications, autoRenew: s.autoRenew, welcomeBonus: s.welcomeBonus,
+      }))
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function save() {
+    const commission = Number(settings.commissionRate);
+    const maxFree = Number(settings.maxFreeOrders);
+    if (!settings.siteName.trim() || !(commission >= 0 && commission <= 100) || !(maxFree >= 0)) {
+      setError("Revisa los datos: la comisión debe estar entre 0 y 100 y el límite de pedidos no puede ser negativo.");
+      return;
+    }
+    setError("");
+    setSaving(true);
+    try {
+      await api("/settings", { method: "PUT", body: { ...settings, commissionRate: commission, maxFreeOrders: maxFree } });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo guardar la configuración.");
+    } finally {
+      setSaving(false);
+    }
   }
-
   return (
     <div className="p-6 max-w-3xl mx-auto">
       <div className="mb-6">
@@ -26,6 +53,8 @@ export default function AdminSettings() {
         <p className="text-muted-foreground text-sm mt-1 font-medium">Ajustes generales de la plataforma BakeFlow</p>
       </div>
 
+      {error && <div className="mb-5 bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
+      {loading && <p className="mb-5 text-sm text-muted-foreground">Cargando configuración...</p>}
       {saved && (
         <div className="mb-5 bg-green-50 border border-green-200 text-green-700 px-5 py-3 rounded-2xl font-bold text-sm flex items-center gap-2">
           <CheckCircle2 size={16} /> Configuración guardada correctamente
@@ -39,7 +68,7 @@ export default function AdminSettings() {
             {[
               { key: "siteName", label: "Nombre de la plataforma", type: "text" },
               { key: "supportEmail", label: "Email de soporte", type: "email" },
-              { key: "commissionRate", label: "Tasa de comisión plan Premium (%)", type: "number" },
+              { key: "commissionRate", label: "Comisión de la plataforma por venta (%)", type: "number" },
               { key: "maxFreeOrders", label: "Pedidos máximos plan Gratuito", type: "number" },
             ].map((f) => (
               <div key={f.key}>
@@ -56,9 +85,9 @@ export default function AdminSettings() {
           <h2 className="font-bold text-foreground mb-4">Opciones del sistema</h2>
           <div className="space-y-4">
             {[
-              { key: "maintenanceMode", label: "Modo mantenimiento", desc: "Deshabilita el acceso público a la plataforma" },
-              { key: "emailNotifications", label: "Notificaciones por email", desc: "Envía emails automáticos a usuarios" },
-              { key: "autoRenew", label: "Renovación automática", desc: "Renueva suscripciones automáticamente" },
+              { key: "maintenanceMode", label: "Modo mantenimiento", desc: "Solo el administrador puede operar mientras está activo" },
+              { key: "emailNotifications", label: "Notificaciones por email", desc: "Preferencia guardada (el envío de correos aún no está activo)" },
+              { key: "autoRenew", label: "Renovación automática", desc: "Preferencia guardada (los cobros son simulados)" },
               { key: "welcomeBonus", label: "Bono de bienvenida", desc: "1 mes Pro gratis para nuevas pastelerías" },
             ].map((opt) => (
               <div key={opt.key} className="flex items-center justify-between py-2 border-b border-border last:border-0">
@@ -77,8 +106,8 @@ export default function AdminSettings() {
           </div>
         </div>
 
-        <button onClick={save}
-          className="w-full py-3.5 bg-gradient-to-r from-pink-400 to-purple-400 text-white font-bold rounded-2xl shadow-md hover:shadow-lg transition-all active:scale-95">
+        <button onClick={save} disabled={saving || loading}
+          className="disabled:opacity-60 w-full py-3.5 bg-gradient-to-r from-pink-400 to-purple-400 text-white font-bold rounded-2xl shadow-md hover:shadow-lg transition-all active:scale-95">
           <span className="flex items-center justify-center gap-2"><CheckCircle2 size={16} /> Guardar configuración</span>
         </button>
       </div>

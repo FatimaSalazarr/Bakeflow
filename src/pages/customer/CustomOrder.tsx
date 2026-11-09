@@ -1,7 +1,8 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Cake, Palette, FileText, CheckCircle2, ImagePlus, X, Clock, Send, XCircle, DollarSign, Sparkles, CreditCard, Lock, ChevronRight, Check } from "lucide-react";
-
-import type { SharedRequest, CustomRequestStatus } from "../../App";
+import { api, uploadImage } from "../../services/api";
+import { toCustomRequest, type CustomRequest, type CustomRequestStatus } from "../../services/customRequests";
+import { ORDERS_CHANGED } from "../../hooks/useOrderCount";
 
 const FLAVORS = ["Vainilla", "Chocolate", "Fresa", "Limón", "Red Velvet", "Moka", "Nuez", "Zanahoria"];
 const FROSTINGS = ["Crema de mantequilla", "Ganache de chocolate", "Crema de queso", "Merengue", "Fondant", "Chantilly"];
@@ -15,25 +16,53 @@ const STATUS_UI: Record<CustomRequestStatus, { label: string; class: string; Ico
   declined:        { label: "Rechazaste",           class: "badge-cancelled", Icon: XCircle },
 };
 
-interface Props {
-  customRequests: SharedRequest[];
-  onUpdateRequests: (reqs: SharedRequest[]) => void;
-}
+export default function CustomOrder() { // <-- Ya no recibe props
+  // 1. Estados para los datos del servidor
+  const [myRequests, setMyRequests] = useState<CustomRequest[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [bakeries, setBakeries] = useState<{ _id: string; name: string }[]>([]);
 
-export default function CustomOrder({ customRequests, onUpdateRequests }: Props) {
+  // Estados de la interfaz
   const [tab, setTab] = useState<"new" | "my">("new");
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({
     size: "", flavor: "", frosting: "", decorations: [] as string[],
     theme: "", message: "", persons: "", date: "", notes: "", budget: "",
-    refImage: "",
+    refImage: "", bakeryId: "",
   });
   const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  
+  // Estados de pago
   const [payingForId, setPayingForId] = useState<string | null>(null);
   const [cardForm, setCardForm] = useState({ number: "", name: "", expiry: "", cvv: "" });
   const [payDone, setPayDone] = useState(false);
 
+  // Pastelerías disponibles para recibir la solicitud
+  useEffect(() => {
+    api<{ bakeries: { _id: string; name: string }[] }>("/bakeries")
+      .then(({ bakeries }) => {
+        setBakeries(bakeries);
+        if (bakeries.length === 1) setForm((f) => ({ ...f, bakeryId: bakeries[0]._id }));
+      })
+      .catch((e) => setError(e.message));
+  }, []);
+
+  function loadMine() {
+    setLoading(true);
+    api<{ orders: any[] }>("/orders?type=custom")
+      .then(({ orders }) => setMyRequests(orders.map(toCustomRequest)))
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }
+
+  // Al abrir "Mis solicitudes" se vuelven a pedir al servidor
+  useEffect(() => {
+    if (tab === "my") loadMine();
+  }, [tab]);
+  // Utilidades de tarjetas
   function formatCard(v: string) {
     return v.replace(/\D/g, "").slice(0, 16).replace(/(.{4})/g, "$1 ").trim();
   }
@@ -42,42 +71,111 @@ export default function CustomOrder({ customRequests, onUpdateRequests }: Props)
     return d.length >= 3 ? d.slice(0, 2) + "/" + d.slice(2) : d;
   }
   const cardValid = cardForm.number.replace(/\s/g, "").length === 16 && cardForm.name.trim().length > 1 && cardForm.expiry.length === 5 && cardForm.cvv.length >= 3;
+  const pendingPriceCount = myRequests.filter(r => r.status === "awaiting_client").length;
 
-  const pendingPriceCount = customRequests.filter(r => r.status === "awaiting_client").length;
-
-  function handleRefImage(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleRefImage(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => setForm(f => ({ ...f, refImage: ev.target?.result as string }));
-    reader.readAsDataURL(file);
+    setError("");
+    try {
+      const url = await uploadImage(file);
+      setForm(f => ({ ...f, refImage: url }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo subir la imagen.");
+    }
   }
-
   function toggleDeco(d: string) {
     setForm(p => ({ ...p, decorations: p.decorations.includes(d) ? p.decorations.filter(x => x !== d) : [...p.decorations, d] }));
   }
 
   function resetForm() {
     setSubmitted(false); setStep(1);
-    setForm({ size: "", flavor: "", frosting: "", decorations: [], theme: "", message: "", persons: "", date: "", notes: "", budget: "", refImage: "" });
+    setForm({ size: "", flavor: "", frosting: "", decorations: [], theme: "", message: "", persons: "", date: "", notes: "", budget: "", refImage: "", bakeryId: bakeries.length === 1 ? bakeries[0]._id : "" });
   }
 
-  function clientDecide(id: string, accept: boolean) {
+  // Enviar la solicitud: se crea un pedido personalizado pendiente de cotización
+  // Enviar la solicitud: se crea un pedido personalizado pendiente de cotización
+  async function submitNewRequest() {
+    setIsSubmitting(true);
+    setError("");
+    
+    try {
+      // 1. Hacemos la petición
+      const response = await api("/orders", {
+        method: "POST",
+        body: {
+          orderType: "custom",
+          bakeryId: form.bakeryId,
+          deliveryDate: form.date,
+          customDetails: {
+            size: form.size, 
+            flavor: form.flavor, 
+            frosting: form.frosting, 
+            decorations: form.decorations.join(", "),
+            theme: form.theme, 
+            message: form.message, 
+            persons: form.persons, 
+            budget: form.budget,
+            specialInstructions: form.notes, 
+            referenceImageUrl: form.refImage,
+          },
+        },
+      });
+
+      // 2. Si la petición fue exitosa (asumiendo que tu utilidad `api` lanza 
+      //    errores adecuadamente o devuelve la data directamente).
+      setSubmitted(true);
+      window.dispatchEvent(new Event(ORDERS_CHANGED));
+      
+    } catch (e: any) {
+      // 3. Capturamos CUALQUIER error y lo mostramos
+      console.error("Error al enviar solicitud:", e);
+      setError(e.message || "Hubo un error al enviar tu solicitud. Intenta de nuevo.");
+    } finally {
+      // 4. CRÍTICO: Esto garantiza que el botón se desbloquee pase lo que pase
+      setIsSubmitting(false);
+    }
+  }
+
+  function updateLocalState(id: string, patch: Partial<CustomRequest>) {
+    setMyRequests(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
+  }
+
+  // Decisión del cliente sobre la cotización: aceptar abre el pago; rechazar se envía al servidor
+  async function clientDecide(id: string, accept: boolean) {
     if (accept) {
       setPayingForId(id);
       setCardForm({ number: "", name: "", expiry: "", cvv: "" });
       setPayDone(false);
-    } else {
-      onUpdateRequests(customRequests.map(r => r.id === id ? { ...r, status: "declined" } : r));
+      return;
+    }
+    const req = myRequests.find(r => r.id === id);
+    if (!req) return;
+    setError("");
+    try {
+      await api(`/orders/${req.dbId}/respond`, { method: "PATCH", body: { accept: false } });
+      updateLocalState(id, { status: "declined" });
+      window.dispatchEvent(new Event(ORDERS_CHANGED));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error al rechazar la cotización.");
     }
   }
 
-  function confirmPayment() {
-    if (!payingForId) return;
-    onUpdateRequests(customRequests.map(r => r.id === payingForId ? { ...r, status: "confirmed" } : r));
-    setPayDone(true);
-    setTimeout(() => { setPayingForId(null); setPayDone(false); }, 3000);
+  // Confirmar pago = aceptar la cotización (el cobro con tarjeta sigue siendo simulado)
+  async function confirmPayment() {
+    const req = myRequests.find(r => r.id === payingForId);
+    if (!req) return;
+    setError("");
+    try {
+      await api(`/orders/${req.dbId}/respond`, { method: "PATCH", body: { accept: true } });
+      updateLocalState(req.id, { status: "confirmed" });
+      window.dispatchEvent(new Event(ORDERS_CHANGED));
+      setPayDone(true);
+      setTimeout(() => { setPayingForId(null); setPayDone(false); }, 3000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error al procesar el pago.");
+      setPayingForId(null);
+    }
   }
-
   const STEP_LABELS = ["Diseño", "Detalles", "Confirmación"];
 
   return (
@@ -89,6 +187,8 @@ export default function CustomOrder({ customRequests, onUpdateRequests }: Props)
         <p className="text-muted-foreground text-sm mt-1 font-medium">Diseña tu pastel especial o revisa tus solicitudes</p>
       </div>
 
+      {error && <div className="mb-4 bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
+
       {/* Tabs */}
       <div className="flex bg-muted rounded-2xl p-1 mb-6 border border-border">
         <button onClick={() => setTab("new")}
@@ -99,7 +199,7 @@ export default function CustomOrder({ customRequests, onUpdateRequests }: Props)
           className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 relative ${tab === "my" ? "bg-white text-pink-500 shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
           <Send size={14} /> Mis solicitudes
           {pendingPriceCount > 0 && (
-            <span className="w-5 h-5 bg-pink-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">{pendingPriceCount}</span>
+            <span className="w-5 h-5 bg-pink-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center absolute -top-2 -right-2">{pendingPriceCount}</span>
           )}
         </button>
       </div>
@@ -107,72 +207,75 @@ export default function CustomOrder({ customRequests, onUpdateRequests }: Props)
       {/* ── MIS SOLICITUDES TAB ──────────────────── */}
       {tab === "my" && (
         <div className="space-y-3 animate-fade-up">
-          {customRequests.length === 0 && (
+          {loading ? (
+             <div className="text-center py-16 text-muted-foreground font-medium">Cargando tus solicitudes...</div>
+          ) : myRequests.length === 0 ? (
             <div className="text-center py-16 text-muted-foreground">
               <Sparkles size={40} className="mx-auto mb-3 text-pink-200" />
               <div className="font-medium">Aún no tienes solicitudes</div>
               <button onClick={() => setTab("new")} className="mt-4 px-4 py-2 bg-pink-500 text-white text-sm font-bold rounded-xl hover:bg-pink-600 transition-colors">Crear solicitud</button>
             </div>
-          )}
-          {customRequests.map((r) => {
-            const ui = STATUS_UI[r.status];
-            const StatusIcon = ui.Icon;
-            return (
-              <div key={r.id} className="bg-card rounded-3xl card-shadow border border-border p-5">
-                <div className="flex items-start justify-between gap-3 mb-3">
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <span className="font-bold text-sm text-pink-500">{r.id}</span>
-                      <span className={`flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full border ${ui.class}`}>
-                        <StatusIcon size={9} /> {ui.label}
-                      </span>
+          ) : (
+            myRequests.map((r) => {
+              const ui = STATUS_UI[r.status];
+              const StatusIcon = ui.Icon;
+              return (
+                <div key={r.id} className="bg-card rounded-3xl card-shadow border border-border p-5">
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className="font-bold text-sm text-pink-500">{r.id.substring(0, 6)}</span>
+                        <span className={`flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full border ${ui.class}`}>
+                          <StatusIcon size={9} /> {ui.label}
+                        </span>
+                      </div>
+                      <div className="font-display text-base font-semibold text-foreground">{r.theme}</div>
+                      <div className="text-xs text-muted-foreground">{r.flavor} · {r.size} · {r.date}</div>
                     </div>
-                    <div className="font-display text-base font-semibold text-foreground">{r.theme}</div>
-                    <div className="text-xs text-muted-foreground">{r.flavor} · {r.size} · {r.date}</div>
+                    {r.quotedPrice && (
+                      <div className="text-right shrink-0">
+                        <div className="text-xs text-muted-foreground font-semibold">Cotización</div>
+                        <div className="font-display text-xl font-bold text-pink-500">${r.quotedPrice}</div>
+                      </div>
+                    )}
                   </div>
-                  {r.quotedPrice && (
-                    <div className="text-right shrink-0">
-                      <div className="text-xs text-muted-foreground font-semibold">Cotización</div>
-                      <div className="font-display text-xl font-bold text-pink-500">${r.quotedPrice}</div>
+
+                  {/* Price awaiting client decision */}
+                  {r.status === "awaiting_client" && r.quotedPrice && (
+                    <div className="mt-3 bg-violet-50 border border-violet-100 rounded-2xl p-4">
+                      <div className="text-sm font-bold text-violet-700 mb-1 flex items-center gap-2">
+                        <DollarSign size={14} /> La pastelería cotizó tu pedido en <span className="text-pink-500">${r.quotedPrice}</span>
+                      </div>
+                      <p className="text-xs text-violet-600 font-medium mb-3">
+                        {r.flavor} · {r.frosting} · {r.size} · {r.decorations}
+                      </p>
+                      <div className="flex gap-2">
+                        <button onClick={() => clientDecide(r.id, true)}
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 bg-pink-500 text-white font-bold rounded-xl text-sm hover:bg-pink-600 shadow-sm transition-all active:scale-95">
+                          <CheckCircle2 size={13} /> Aceptar cotización
+                        </button>
+                        <button onClick={() => clientDecide(r.id, false)}
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 bg-white border-2 border-pink-400 text-pink-500 font-bold rounded-xl text-sm hover:bg-pink-50 transition-all active:scale-95">
+                          <XCircle size={13} /> Rechazar
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {r.status === "confirmed" && (
+                    <div className="mt-2 bg-pink-50 border border-pink-200 rounded-2xl p-3 text-sm text-pink-700 font-bold flex items-center gap-2">
+                      <CheckCircle2 size={14} /> Pedido confirmado. La pastelería ya está trabajando en él.
+                    </div>
+                  )}
+                  {r.status === "rejected" && (
+                    <div className="mt-2 bg-rose-50 border border-rose-100 rounded-2xl p-3 text-sm text-rose-600 font-medium flex items-center gap-2">
+                      <XCircle size={14} /> La pastelería no puede realizar este pedido.{r.bakeryNote ? ` Motivo: ${r.bakeryNote}` : ""}
                     </div>
                   )}
                 </div>
-
-                {/* Price awaiting client decision */}
-                {r.status === "awaiting_client" && r.quotedPrice && (
-                  <div className="mt-3 bg-violet-50 border border-violet-100 rounded-2xl p-4">
-                    <div className="text-sm font-bold text-violet-700 mb-1 flex items-center gap-2">
-                      <DollarSign size={14} /> La pastelería cotizó tu pedido en <span className="text-pink-500">${r.quotedPrice}</span>
-                    </div>
-                    <p className="text-xs text-violet-600 font-medium mb-3">
-                      {r.flavor} · {r.frosting} · {r.size} · {r.decorations}
-                    </p>
-                    <div className="flex gap-2">
-                      <button onClick={() => clientDecide(r.id, true)}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 bg-pink-500 text-white font-bold rounded-xl text-sm hover:bg-pink-600 shadow-sm transition-all active:scale-95">
-                        <CheckCircle2 size={13} /> Aceptar cotización
-                      </button>
-                      <button onClick={() => clientDecide(r.id, false)}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 bg-white border-2 border-pink-400 text-pink-500 font-bold rounded-xl text-sm hover:bg-pink-50 transition-all active:scale-95">
-                        <XCircle size={13} /> Rechazar
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {r.status === "confirmed" && (
-                  <div className="mt-2 bg-pink-50 border border-pink-200 rounded-2xl p-3 text-sm text-pink-700 font-bold flex items-center gap-2">
-                    <CheckCircle2 size={14} /> Pedido confirmado. La pastelería ya está trabajando en él.
-                  </div>
-                )}
-                {r.status === "rejected" && (
-                  <div className="mt-2 bg-rose-50 border border-rose-100 rounded-2xl p-3 text-sm text-rose-600 font-medium flex items-center gap-2">
-                    <XCircle size={14} /> La pastelería no puede realizar este pedido.
-                  </div>
-                )}
-              </div>
-            );
-          })}
+              );
+            })
+          )}
         </div>
       )}
 
@@ -348,6 +451,13 @@ export default function CustomOrder({ customRequests, onUpdateRequests }: Props)
             {step === 3 && (
               <div className="space-y-4">
                 <h3 className="font-display text-lg font-semibold text-foreground">Resumen de tu pedido</h3>
+                <div>
+                  <label className="block text-sm font-bold text-foreground mb-2">Pastelería</label>
+                  <select value={form.bakeryId} onChange={e => setForm({ ...form, bakeryId: e.target.value })} className="input-base">
+                    <option value="">Elige una pastelería...</option>
+                    {bakeries.map(b => <option key={b._id} value={b._id}>{b.name}</option>)}
+                  </select>
+                </div>
                 <div className="divide-y divide-border">
                   {[
                     { label: "Tamaño", value: form.size },
@@ -371,12 +481,16 @@ export default function CustomOrder({ customRequests, onUpdateRequests }: Props)
                     <img src={form.refImage} alt="Referencia" className="w-full h-32 object-cover rounded-2xl border border-border" />
                   </div>
                 )}
+                {!form.date && <div className="text-xs font-semibold text-amber-700">Indica la fecha de entrega en el paso anterior.</div>}
                 <div className="bg-pink-50 rounded-2xl p-3.5 text-xs text-pink-700 font-medium border border-pink-100">
                   La pastelería revisará tu solicitud y te enviará una cotización. Podrás aceptarla o rechazarla.
                 </div>
                 <div className="flex gap-3">
                   <button onClick={() => setStep(2)} className="flex-1 py-3 border-2 border-border text-foreground font-bold rounded-2xl hover:bg-muted transition-colors">Atrás</button>
-                  <button onClick={() => setSubmitted(true)} className="flex-1 py-3 bg-pink-500 hover:bg-pink-600 text-white font-bold rounded-2xl shadow-md active:scale-95 transition-all">Enviar solicitud</button>
+                  {/* SE HACE EL POST AL DAR CLIC AQUI */}
+                  <button onClick={submitNewRequest} disabled={isSubmitting || !form.bakeryId || !form.date} className="flex-1 py-3 bg-pink-500 hover:bg-pink-600 text-white font-bold rounded-2xl shadow-md active:scale-95 transition-all disabled:opacity-50">
+                    {isSubmitting ? "Enviando..." : "Enviar solicitud"}
+                  </button>
                 </div>
               </div>
             )}
@@ -385,7 +499,7 @@ export default function CustomOrder({ customRequests, onUpdateRequests }: Props)
       )}
       {/* ── CARD PAYMENT MODAL ─────────────────── */}
       {payingForId && (() => {
-        const req = customRequests.find(r => r.id === payingForId);
+        const req = myRequests.find(r => r.id === payingForId);
         return (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-4">
             <div className="bg-card rounded-3xl card-shadow-xl w-full max-w-sm p-6 animate-fade-up">
@@ -404,7 +518,7 @@ export default function CustomOrder({ customRequests, onUpdateRequests }: Props)
                       <h2 className="font-display text-xl font-semibold text-foreground flex items-center gap-2">
                         <CreditCard size={20} className="text-pink-500" /> Pago con tarjeta
                       </h2>
-                      <p className="text-xs text-muted-foreground mt-0.5">Pedido especial {req?.id}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Pedido especial {req?.id.substring(0, 6)}</p>
                     </div>
                     <button onClick={() => setPayingForId(null)} className="w-8 h-8 bg-muted rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground">
                       <X size={16} />

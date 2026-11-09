@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { api, getStoredUser } from "../../services/api";
 import { Search, ShoppingBag, Plus, Minus, Trash2, CreditCard, Banknote, ArrowRightLeft, Send, Check, X, Sparkles, Building2 } from "lucide-react";
 
 interface Product {
@@ -7,6 +8,7 @@ interface Product {
   price: number;
   category: string;
   image: string;
+  stock: number;
 }
 
 interface CartItem {
@@ -14,18 +16,14 @@ interface CartItem {
   quantity: number;
 }
 
-const PRODUCTS: Product[] = [
-  { id: "P01", name: "Pastel de Fresa", price: 350, category: "Pasteles", image: "https://images.unsplash.com/photo-1565958011703-44f9829ba187?w=400&auto=format&fit=crop" },
-  { id: "P02", name: "Red Velvet", price: 380, category: "Pasteles", image: "https://images.unsplash.com/photo-1586788680434-30d324b2d46f?w=400&auto=format&fit=crop" },
-  { id: "P03", name: "Cupcakes Rainbow (x6)", price: 180, category: "Cupcakes", image: "https://images.unsplash.com/photo-1576618148400-f54bed99fcfd?w=400&auto=format&fit=crop" },
-  { id: "P04", name: "Cheesecake de Maracuyá", price: 320, category: "Postres", image: "https://images.unsplash.com/photo-1533134242443-d4fd215305ad?w=400&auto=format&fit=crop" },
-  { id: "P05", name: "Pastel de Vainilla y Rosas", price: 420, category: "Pasteles", image: "https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400&auto=format&fit=crop" },
-  { id: "P06", name: "Macarons Surtidos (x12)", price: 240, category: "Postres", image: "https://images.unsplash.com/photo-1569864358642-9d1684040f43?w=400&auto=format&fit=crop" },
-];
-
-const CATEGORIES = ["Todos", "Pasteles", "Cupcakes", "Postres"];
-
+function toProduct(p: any): Product {
+  return { id: p._id, name: p.name, price: p.price, category: p.categoryId?.name || "Otros", image: p.imageUrl || "", stock: p.stock ?? 0 };
+}
 export default function BakeryPOS() {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loadError, setLoadError] = useState("");
+  const [saleError, setSaleError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("Todos");
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -38,11 +36,22 @@ export default function BakeryPOS() {
   const [clientEmail, setClientEmail] = useState("");
   const [saleCompleted, setSaleCompleted] = useState(false);
 
-  // Add to cart
+  function loadProducts() {
+    const bakeryId = getStoredUser()?.bakeryId;
+    api<{ products: any[] }>(`/products${bakeryId ? `?bakeryId=${bakeryId}` : ""}`)
+      .then(({ products }) => setProducts(products.filter((p) => p.isAvailable && p.stock > 0).map(toProduct)))
+      .catch((e) => setLoadError(e.message));
+  }
+  useEffect(loadProducts, []);
+
+  const CATEGORIES = ["Todos", ...Array.from(new Set(products.map((p) => p.category)))];
+
+  // Add to cart (sin superar el stock disponible)
   function addToCart(product: Product) {
     setCart((prev) => {
       const existing = prev.find((item) => item.product.id === product.id);
       if (existing) {
+        if (existing.quantity >= product.stock) return prev;
         return prev.map((item) =>
           item.product.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
         );
@@ -57,7 +66,7 @@ export default function BakeryPOS() {
       prev
         .map((item) => {
           if (item.product.id === id) {
-            const newQty = item.quantity + delta;
+            const newQty = Math.min(item.quantity + delta, item.product.stock);
             return newQty > 0 ? { ...item, quantity: newQty } : null;
           }
           return item;
@@ -78,15 +87,39 @@ export default function BakeryPOS() {
   const change = cashAmount >= total ? cashAmount - total : 0;
 
   // Filter products
-  const filteredProducts = PRODUCTS.filter((p) => {
+  const filteredProducts = products.filter((p) => {
     const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase());
     const matchesCategory = selectedCategory === "Todos" || p.category === selectedCategory;
     return matchesSearch && matchesCategory;
   });
 
-  function handleCompleteSale(e: React.FormEvent) {
+  // Registra la venta en el backend (descuenta stock y genera el ingreso en finanzas)
+  async function handleCompleteSale(e: React.FormEvent) {
     e.preventDefault();
+    setSaleError("");
+    setSubmitting(true);
+    try {
+      await api("/orders", {
+        method: "POST",
+        body: {
+          orderType: "standard",
+          isPointOfSale: true,
+          paymentMethod,
+          deliveryMethod: "pickup",
+          deliveryDate: new Date().toISOString(),
+          customerEmail: clientEmail.trim() || undefined,
+          items: cart.map((i) => ({ productId: i.product.id, quantity: i.quantity })),
+        },
+      });
+    } catch (err) {
+      setSaleError(err instanceof Error ? err.message : "No se pudo registrar la venta.");
+      setSubmitting(false);
+      loadProducts(); // el stock pudo haber cambiado
+      return;
+    }
+    setSubmitting(false);
     setSaleCompleted(true);
+    loadProducts();
     setTimeout(() => {
       setSaleCompleted(false);
       setShowCheckout(false);
@@ -95,7 +128,6 @@ export default function BakeryPOS() {
       setClientEmail("");
     }, 2500);
   }
-
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto">
       {/* Header */}
@@ -140,6 +172,7 @@ export default function BakeryPOS() {
             </div>
           </div>
 
+          {loadError && <div className="bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{loadError}</div>}
           {/* Products Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             {filteredProducts.map((product) => (
@@ -149,11 +182,11 @@ export default function BakeryPOS() {
                 className="group relative bg-card rounded-3xl border border-border card-shadow overflow-hidden cursor-pointer hover:border-pink-300 transition-all hover:shadow-md flex flex-col justify-between"
               >
                 <div className="relative h-36 overflow-hidden">
-                  <img
+                  {product.image ? <img
                     src={product.image}
                     alt={product.name}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  />
+                  /> : <div className="w-full h-full bg-muted flex items-center justify-center text-muted-foreground text-xs font-semibold">Sin imagen</div>}
                   {/* Hover Overlay */}
                   <div className="absolute inset-0 bg-pink-500/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                     <span className="bg-white text-pink-600 font-bold text-xs px-3 py-1.5 rounded-full shadow-md flex items-center gap-1 scale-90 group-hover:scale-100 transition-transform">
@@ -162,7 +195,7 @@ export default function BakeryPOS() {
                   </div>
                 </div>
                 <div className="p-3.5">
-                  <div className="text-xs text-muted-foreground font-semibold">{product.category}</div>
+                  <div className="text-xs text-muted-foreground font-semibold">{product.category} · Stock: {product.stock}</div>
                   <div className="font-semibold text-sm text-foreground truncate">{product.name}</div>
                   <div className="font-display font-bold text-pink-500 text-base mt-1">
                     ${product.price.toFixed(2)}
@@ -269,7 +302,7 @@ export default function BakeryPOS() {
                 </div>
                 <h3 className="font-display text-2xl font-bold text-foreground">¡Venta Exitosa!</h3>
                 <p className="text-sm text-muted-foreground font-medium">
-                  El ticket ha sido procesado y enviado al correo proporcionado.
+                  La venta quedó registrada y el stock se actualizó.
                 </p>
               </div>
             ) : (
@@ -387,7 +420,7 @@ export default function BakeryPOS() {
                 {/* Envío de ticket por correo */}
                 <div>
                   <label className="text-xs font-bold text-foreground block mb-1.5">
-                    Correo para enviar ticket (Opcional)
+                    Correo del cliente (opcional, vincula la venta a su cuenta)
                   </label>
                   <div className="relative">
                     <Send size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -401,10 +434,12 @@ export default function BakeryPOS() {
                   </div>
                 </div>
 
+                {saleError && <div className="bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{saleError}</div>}
+
                 {/* Botón confirmar */}
                 <button
                   type="submit"
-                  disabled={paymentMethod === "cash" && cashAmount < total}
+                  disabled={submitting || (paymentMethod === "cash" && cashAmount < total)}
                   className="w-full py-3 bg-pink-500 hover:bg-pink-600 text-white font-bold rounded-2xl text-sm transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed mt-2"
                 >
                   Finalizar Pago

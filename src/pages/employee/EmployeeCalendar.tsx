@@ -1,19 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ChevronLeft, ChevronRight, Package, Lightbulb, Calendar } from "lucide-react";
+import { api } from "../../services/api";
+import { isDeadStatus, DB_TO_UI, orderCode, orderTitle, dateKeyOf } from "../../services/orders";
 
 const DAYS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
 const MONTH_NAMES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 
-const MY_ORDERS_DATA: Record<string, { id: string; cake: string; status: string }[]> = {
-  "2026-08-20": [{ id: "#1041", cake: "Pastel de fresa", status: "ready" }],
-  "2026-08-27": [{ id: "#1040", cake: "Red Velvet x2", status: "progress" }],
-  "2026-09-11": [{ id: "#1044", cake: "Cupcakes x24", status: "progress" }],
-  "2026-09-12": [{ id: "#1043", cake: "Pastel de cumpleaños", status: "progress" }],
-  "2026-09-25": [{ id: "#1048", cake: "Cupcakes rainbow", status: "pending" }],
-  "2026-10-05": [{ id: "#1060", cake: "Pastel de vainilla", status: "pending" }],
-  "2026-10-15": [{ id: "#1061", cake: "Cheesecake maracuyá", status: "pending" }],
-};
+interface CalOrder { id: string; cake: string; status: string; }
 
 function dateKey(year: number, month: number, day: number) {
   return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
@@ -23,9 +17,25 @@ interface Props { onNavigate?: (page: string) => void; }
 
 export default function EmployeeCalendar({ onNavigate }: Props = {}) {
   const today = new Date();
-  const [year, setYear] = useState(2026);
-  const [month, setMonth] = useState(8);
+  const [year, setYear] = useState(today.getFullYear());
+  const [month, setMonth] = useState(today.getMonth());
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [ordersData, setOrdersData] = useState<Record<string, CalOrder[]>>({});
+  const [error, setError] = useState("");
+
+  // El backend ya devuelve solo los pedidos asignados a este empleado
+  useEffect(() => {
+    api<{ orders: any[] }>("/orders")
+      .then(({ orders }) => {
+        const grouped: Record<string, CalOrder[]> = {};
+        for (const o of orders) {
+          if (isDeadStatus(o.status)) continue;
+          (grouped[dateKeyOf(o.deliveryDate)] ||= []).push({ id: orderCode(o), cake: orderTitle(o), status: DB_TO_UI[o.status] || "pending" });
+        }
+        setOrdersData(grouped);
+      })
+      .catch((e) => setError(e.message));
+  }, []);
 
   const isAtMinMonth = year === today.getFullYear() && month === today.getMonth();
 
@@ -50,10 +60,10 @@ export default function EmployeeCalendar({ onNavigate }: Props = {}) {
   const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month;
   const todayDate = today.getDate();
 
-  const monthEntries = Object.entries(MY_ORDERS_DATA)
+  const monthEntries = Object.entries(ordersData)
     .filter(([k]) => k.startsWith(`${year}-${String(month + 1).padStart(2, "0")}`));
 
-  const selectedOrders = selectedKey ? (MY_ORDERS_DATA[selectedKey] ?? []) : [];
+  const selectedOrders = selectedKey ? (ordersData[selectedKey] ?? []) : [];
   const selectedDay = selectedKey ? Number(selectedKey.split("-")[2]) : null;
 
   // Next upcoming task reminder
@@ -71,6 +81,7 @@ export default function EmployeeCalendar({ onNavigate }: Props = {}) {
         </p>
       </div>
 
+      {error && <div className="mb-4 bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Calendar */}
         <div className="lg:col-span-2 bg-card rounded-3xl card-shadow border border-border p-4 md:p-5">
@@ -98,7 +109,7 @@ export default function EmployeeCalendar({ onNavigate }: Props = {}) {
             {cells.map((day, i) => {
               if (!day) return <div key={i} />;
               const key = dateKey(year, month, day);
-              const orders = MY_ORDERS_DATA[key] ?? [];
+              const orders = ordersData[key] ?? [];
               const isSelected = key === selectedKey;
               const isToday = isCurrentMonth && day === todayDate;
 
@@ -153,8 +164,8 @@ export default function EmployeeCalendar({ onNavigate }: Props = {}) {
                   <div key={o.id} className="p-3 bg-muted rounded-2xl">
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="font-bold text-sm text-indigo-500">{o.id}</span>
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${o.status === "progress" ? "badge-progress" : o.status === "ready" ? "badge-ready" : "badge-pending"}`}>
-                        {o.status === "progress" ? "En proceso" : o.status === "ready" ? "Listo" : "Pendiente"}
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${o.status === "progress" ? "badge-progress" : o.status === "ready" ? "badge-ready" : o.status === "delivered" ? "badge-delivered" : "badge-pending"}`}>
+                        {o.status === "progress" ? "En proceso" : o.status === "ready" ? "Listo" : o.status === "delivered" ? "Entregado" : "Pendiente"}
                       </span>
                     </div>
                     <div className="text-sm font-semibold text-foreground">{o.cake}</div>

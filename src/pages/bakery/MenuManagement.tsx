@@ -1,57 +1,96 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Plus, Pencil, Trash2, X, Cake, ImagePlus } from "lucide-react";
+import { api, getStoredUser, uploadImage } from "../../services/api";
 
-const INITIAL_ITEMS = [
-  { id: 1, name: "Pastel de fresa", category: "Pasteles", price: 480, active: true, desc: "Esponjoso pastel con crema de fresa y fresas frescas", image: "https://images.unsplash.com/photo-1565958011703-44f9829ba187?w=400&q=80" },
-  { id: 2, name: "Red Velvet Kawaii", category: "Pasteles", price: 520, active: true, desc: "Clásico red velvet con crema de queso decoración kawaii", image: "https://images.unsplash.com/photo-1621303837174-89787a7d4729?w=400&q=80" },
-  { id: 3, name: "Cheesecake de maracuyá", category: "Cheesecakes", price: 380, active: true, desc: "Cremoso cheesecake con coulis de maracuyá", image: "https://images.unsplash.com/photo-1524351199678-941a58a3df50?w=400&q=80" },
-  { id: 4, name: "Cupcakes de vainilla", category: "Cupcakes", price: 240, active: false, desc: "Docena de cupcakes esponjosos con betún de vainilla", image: "https://images.unsplash.com/photo-1576618148400-f54bed99fcfd?w=400&q=80" },
-  { id: 5, name: "Pastel Galaxy", category: "Especiales", price: 650, active: true, desc: "Impresionante pastel efecto galaxia con glitters comestibles", image: "https://images.unsplash.com/photo-1606890658317-7d14490b76fd?w=400&q=80" },
-];
+interface Item { id: string; name: string; category: string; categoryId: string | null; price: number; active: boolean; desc: string; image: string; }
+interface Category { _id: string; name: string; }
 
-const CATEGORIES = ["Pasteles", "Cupcakes", "Cheesecakes", "Especiales"];
-
-type Item = typeof INITIAL_ITEMS[0];
+function toItem(p: any): Item {
+  return {
+    id: p._id, name: p.name, category: p.categoryId?.name || "Sin categoría", categoryId: p.categoryId?._id || null,
+    price: p.price, active: p.isAvailable, desc: p.description || "", image: p.imageUrl || "",
+  };
+}
 
 export default function MenuManagement() {
-  const [items, setItems] = useState(INITIAL_ITEMS);
+  const [items, setItems] = useState<Item[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [editItem, setEditItem] = useState<Item | null>(null);
-  const [form, setForm] = useState({ name: "", category: "Pasteles", price: "", desc: "", image: "" });
+  const [form, setForm] = useState({ name: "", categoryId: "", price: "", desc: "", image: "" });
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const bakeryId = getStoredUser()?.bakeryId;
+    Promise.all([
+      api<{ products: any[] }>(`/products${bakeryId ? `?bakeryId=${bakeryId}` : ""}`),
+      api<{ categories: Category[] }>("/categories"),
+    ])
+      .then(([p, c]) => { setItems(p.products.map(toItem)); setCategories(c.categories); })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
 
   function openNew() {
     setEditItem(null);
-    setForm({ name: "", category: "Pasteles", price: "", desc: "", image: "" });
+    setForm({ name: "", categoryId: "", price: "", desc: "", image: "" });
     setShowModal(true);
   }
   function openEdit(item: Item) {
     setEditItem(item);
-    setForm({ name: item.name, category: item.category, price: String(item.price), desc: item.desc, image: item.image });
+    setForm({ name: item.name, categoryId: item.categoryId || "", price: String(item.price), desc: item.desc, image: item.image });
     setShowModal(true);
   }
 
-  function handleImageFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleImageFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => setForm((f) => ({ ...f, image: ev.target?.result as string }));
-    reader.readAsDataURL(file);
-  }
-
-  function save() {
-    if (!form.name.trim()) return;
-    if (editItem) {
-      setItems((prev) => prev.map((i) => i.id === editItem.id ? { ...i, ...form, price: Number(form.price) } : i));
-    } else {
-      setItems((prev) => [...prev, { id: Date.now(), ...form, price: Number(form.price), active: true }]);
+    setError("");
+    try {
+      const url = await uploadImage(file);
+      setForm((f) => ({ ...f, image: url }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo subir la imagen.");
     }
-    setShowModal(false);
+  }
+  async function save() {
+    if (!form.name.trim()) return;
+    setError("");
+    const body = {
+      name: form.name.trim(), description: form.desc, price: Number(form.price) || 0,
+      imageUrl: form.image, categoryId: form.categoryId || null,
+    };
+    try {
+      if (editItem) {
+        const { product } = await api("/products/" + editItem.id, { method: "PUT", body });
+        setItems((prev) => prev.map((i) => i.id === editItem.id
+          ? { ...i, ...toItem({ ...product, categoryId: categories.find((c) => c._id === form.categoryId) || null }) } : i));
+      } else {
+        const { product } = await api("/products", { method: "POST", body: { ...body, stock: 0 } });
+        setItems((prev) => [...prev, toItem({ ...product, categoryId: categories.find((c) => c._id === form.categoryId) || null })]);
+      }
+      setShowModal(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo guardar el producto.");
+    }
   }
 
-  function toggle(id: number) { setItems((prev) => prev.map((i) => i.id === id ? { ...i, active: !i.active } : i)); }
-  function remove(id: number) { setItems((prev) => prev.filter((i) => i.id !== id)); }
-
+  async function toggle(id: string) {
+    const item = items.find((i) => i.id === id);
+    if (!item) return;
+    try {
+      await api("/products/" + id, { method: "PUT", body: { isAvailable: !item.active } });
+      setItems((prev) => prev.map((i) => i.id === id ? { ...i, active: !i.active } : i));
+    } catch (e) { setError(e instanceof Error ? e.message : "Error al actualizar."); }
+  }
+  async function remove(id: string) {
+    try {
+      await api("/products/" + id, { method: "DELETE" });
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    } catch (e) { setError(e instanceof Error ? e.message : "Error al eliminar."); }
+  }
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-6">
@@ -65,6 +104,8 @@ export default function MenuManagement() {
         </button>
       </div>
 
+      {error && <div className="mb-4 bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
+      {loading && <p className="text-sm text-muted-foreground">Cargando menú...</p>}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {items.map((item) => (
           <div key={item.id} className={`bg-card rounded-3xl card-shadow border transition-all flex flex-col ${item.active ? "border-border" : "border-dashed border-border opacity-60"}`}>
@@ -138,9 +179,10 @@ export default function MenuManagement() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-foreground mb-1.5">Categoría</label>
-                  <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}
+                  <select value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
                     className="w-full px-4 py-2.5 rounded-2xl border-2 border-border bg-muted focus:outline-none focus:border-pink-400 text-sm font-medium">
-                    {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+                    <option value="">Sin categoría</option>
+                    {categories.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
                   </select>
                 </div>
                 <div>

@@ -1,17 +1,39 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Clock, ChefHat, CheckCircle2, PartyPopper, XCircle, Cake, Phone, User, CreditCard, Lock, ChevronLeft, X, UserCheck, CheckCheck } from "lucide-react";
+import { api } from "../../services/api";
 
-const EMPLOYEES = ["Sin asignar", "Sofía López", "Mia Ramírez", "Daniela Cruz", "Karen Vega"];
 
 type OrderStatus = "pending" | "accepted" | "progress" | "ready" | "delivered" | "cancelled";
 
-const INITIAL_ORDERS = [
-  { id: "#1045", client: "Valentina Ruiz",  cake: "Pastel de bodas",      date: "15 Sep", status: "pending" as OrderStatus,   employee: "Sin asignar", total: "$1,200", phone: "+52 55 9876 5432" },
-  { id: "#1043", client: "Carlos Mendoza",  cake: "Pastel de cumpleaños", date: "12 Sep", status: "progress" as OrderStatus,   employee: "Sofía López",  total: "$480",   phone: "+52 55 1111 2222" },
-  { id: "#1044", client: "Andrea Torres",   cake: "Cupcakes x24",         date: "11 Sep", status: "progress" as OrderStatus,   employee: "Mia Ramírez",  total: "$380",   phone: "+52 55 3333 4444" },
-  { id: "#1042", client: "Luna García",     cake: "Pastel de fresa",      date: "10 Sep", status: "ready" as OrderStatus,     employee: "Daniela Cruz", total: "$480",   phone: "+52 55 5555 6666" },
-  { id: "#1038", client: "Paola Jiménez",   cake: "Red Velvet",           date: "8 Sep",  status: "delivered" as OrderStatus, employee: "Karen Vega",   total: "$520",   phone: "+52 55 7777 8888" },
-];
+interface OrderRow {
+  id: string; dbId: string; client: string; cake: string; date: string; status: OrderStatus;
+  employee: string; total: string; phone: string;
+}
+
+const UI_TO_DB: Record<OrderStatus, string> = {
+  pending: "pending", accepted: "in_preparation", progress: "in_preparation",
+  ready: "ready", delivered: "delivered", cancelled: "cancelled",
+};
+const DB_TO_UI: Record<string, OrderStatus> = {
+  pending_quote: "pending", awaiting_client: "pending", pending: "pending", in_preparation: "progress",
+  ready: "ready", delivered: "delivered", cancelled: "cancelled", rejected: "cancelled", declined: "cancelled",
+};
+
+function toRow(o: any): OrderRow {
+  return {
+    id: "#" + String(o._id).slice(-6).toUpperCase(),
+    dbId: o._id,
+    client: o.customerId?.name || "Cliente",
+    cake: o.orderType === "custom"
+      ? "Pastel personalizado"
+      : (o.items || []).map((i: any) => i.quantity > 1 ? `${i.name} x${i.quantity}` : i.name).join(", ") || "Pedido",
+    date: new Date(o.deliveryDate).toLocaleDateString("es-MX", { day: "numeric", month: "short" }),
+    status: DB_TO_UI[o.status] || "pending",
+    employee: o.assignedEmployeeId?.name || "Sin asignar",
+    total: `${(o.totalPrice || 0).toLocaleString()}`,
+    phone: o.customerId?.phone || "—",
+  };
+}
 
 const STATUS_MAP: Record<OrderStatus, { label: string; class: string; Icon: React.ComponentType<{ size?: number }> }> = {
   pending:   { label: "Pendiente",  class: "badge-pending",   Icon: Clock },
@@ -28,8 +50,28 @@ function formatCard(v: string) { return v.replace(/\D/g, "").slice(0, 16).replac
 function formatExpiry(v: string) { const d = v.replace(/\D/g, "").slice(0, 4); return d.length >= 3 ? d.slice(0, 2) + "/" + d.slice(2) : d; }
 
 export default function OrdersManagement() {
-  const [orders, setOrders] = useState(INITIAL_ORDERS);
-  const [selected, setSelected] = useState<string | null>("#1045");
+  const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [employees, setEmployees] = useState<{ _id: string; name: string }[]>([]);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<string | null>(null);
+
+  useEffect(() => {
+    Promise.all([
+      api<{ orders: any[] }>("/orders"),
+      api<{ users: { _id: string; name: string }[] }>("/users").catch(() => ({ users: [] })),
+    ])
+      .then(([o, u]) => {
+        const rows = o.orders.map(toRow);
+        setOrders(rows);
+        setSelected(rows[0]?.id ?? null);
+        setEmployees(u.users);
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const EMPLOYEES = ["Sin asignar", ...employees.map((e) => e.name)];
   const [showPayment, setShowPayment] = useState<string | null>(null);
   const [payStep, setPayStep] = useState<"form" | "done">("form");
   const [cardForm, setCardForm] = useState({ number: "", name: "", expiry: "", cvv: "" });
@@ -42,21 +84,31 @@ export default function OrdersManagement() {
     && cardForm.expiry.length === 5
     && cardForm.cvv.length >= 3;
 
+  async function update(id: string, body: object, patch: Partial<OrderRow>) {
+    const order = orders.find((o) => o.id === id);
+    if (!order) return;
+    setError("");
+    try {
+      await api("/orders/" + order.dbId, { method: "PUT", body });
+      setOrders((prev) => prev.map((o) => o.id === id ? { ...o, ...patch } : o));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo actualizar el pedido.");
+    }
+  }
   function changeStatus(id: string, status: OrderStatus) {
-    setOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o));
+    update(id, { status: UI_TO_DB[status] }, { status });
   }
   function assignEmployee(id: string, employee: string) {
-    setOrders(prev => prev.map(o => o.id === id ? { ...o, employee } : o));
+    if (employee === "Sin asignar") { update(id, { assignedEmployeeId: null }, { employee }); return; }
+    const emp = employees.find((e) => e.name === employee);
+    if (!emp) return;
+    update(id, { assignedEmployeeId: emp._id }, { employee });
   }
-  function acceptOrder(id: string) {
-    setOrders(prev => prev.map(o => o.id === id ? { ...o, status: "accepted" } : o));
-  }
-  function rejectOrder(id: string) {
-    setOrders(prev => prev.map(o => o.id === id ? { ...o, status: "cancelled" } : o));
-  }
+  function acceptOrder(id: string) { changeStatus(id, "accepted"); }
+  function rejectOrder(id: string) { changeStatus(id, "cancelled"); }
   function collectPayment() {
     if (!showPayment) return;
-    setOrders(prev => prev.map(o => o.id === showPayment ? { ...o, status: "delivered" } : o));
+    changeStatus(showPayment, "delivered");
     setPayStep("done");
     setTimeout(() => {
       setShowPayment(null);
@@ -64,7 +116,6 @@ export default function OrdersManagement() {
       setCardForm({ number: "", name: "", expiry: "", cvv: "" });
     }, 2500);
   }
-
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <div className="mb-6">
@@ -73,6 +124,8 @@ export default function OrdersManagement() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+        {error && <div className="lg:col-span-5 bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
+        {loading && <p className="lg:col-span-5 text-sm text-muted-foreground">Cargando pedidos...</p>}
         {/* List */}
         <div className="lg:col-span-2 space-y-2">
           {orders.map(o => {

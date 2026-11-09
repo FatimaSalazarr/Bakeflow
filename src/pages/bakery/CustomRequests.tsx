@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Clock, CheckCircle2, XCircle, Sparkles, AlertTriangle, DollarSign, Send } from "lucide-react";
-import type { SharedRequest, CustomRequestStatus } from "../../App";
-
+import { api } from "../../services/api";
+import { toCustomRequest, type CustomRequest, type CustomRequestStatus } from "../../services/customRequests";
+import { ORDERS_CHANGED } from "../../hooks/useOrderCount";
 const STATUS_MAP: Record<CustomRequestStatus, { label: string; class: string; Icon: React.ComponentType<{ size?: number; className?: string }> }> = {
   pending:        { label: "Pendiente",        class: "badge-pending",   Icon: Clock },
   awaiting_client:{ label: "Esperando cliente",class: "badge-progress",  Icon: Send },
@@ -10,37 +11,87 @@ const STATUS_MAP: Record<CustomRequestStatus, { label: string; class: string; Ic
   declined:       { label: "Cliente rechazó",   class: "badge-cancelled", Icon: XCircle },
 };
 
-interface Props {
-  customRequests: SharedRequest[];
-  onUpdateRequests: (reqs: SharedRequest[]) => void;
-}
+export default function CustomRequests() {
+  const [customRequests, setCustomRequests] = useState<CustomRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
-export default function CustomRequests({ customRequests, onUpdateRequests }: Props) {
-  const [selected, setSelected] = useState(customRequests[0]?.id ?? "");
+  // Estados de la interfaz
+  const [selected, setSelected] = useState<string>("");
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
   const [priceInput, setPriceInput] = useState("");
   const [showPriceInput, setShowPriceInput] = useState(false);
 
+  // El backend devuelve solo las solicitudes de la pastelería del usuario
+  useEffect(() => {
+    api<{ orders: any[] }>("/orders?type=custom")
+      .then(({ orders }) => {
+        const list = orders.map(toCustomRequest);
+        setCustomRequests(list);
+        if (list.length > 0) setSelected(list[0].id);
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
   const sel = customRequests.find((r) => r.id === selected) ?? customRequests[0];
-  if (!sel) return null;
+
+  function updateLocalState(id: string, patch: Partial<CustomRequest>) {
+    setCustomRequests(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
+  }
+
+  // Enviar cotización: el cliente la recibe y decide si acepta
+  async function sendQuote() {
+    const price = Number(priceInput);
+    if (!sel || !(price > 0)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/orders/${sel.dbId}/quote`, { method: "PATCH", body: { quotedPrice: price } });
+      updateLocalState(sel.id, { status: "awaiting_client", quotedPrice: price });
+      window.dispatchEvent(new Event(ORDERS_CHANGED));
+      setPriceInput("");
+      setShowPriceInput(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Hubo un error al enviar la cotización.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Rechazar la solicitud, con motivo opcional que se notifica al cliente
+  async function reject() {
+    if (!sel) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/orders/${sel.dbId}/reject`, { method: "PATCH", body: { note: rejectNote } });
+      updateLocalState(sel.id, { status: "rejected", bakeryNote: rejectNote });
+      window.dispatchEvent(new Event(ORDERS_CHANGED));
+      setShowRejectInput(false);
+      setRejectNote("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Hubo un error al rechazar el pedido.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (loading) {
+    return <div className="p-10 text-center text-muted-foreground">Cargando solicitudes...</div>;
+  }
+
+  if (!customRequests.length) {
+    return (
+      <div className="p-10 text-center text-muted-foreground">
+        {error && <div className="mb-4 bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
+        No hay pedidos especiales en este momento.
+      </div>
+    );
+  }
 
   const SelIcon = STATUS_MAP[sel.status].Icon;
-
-  function update(id: string, patch: Partial<SharedRequest>) {
-    onUpdateRequests(customRequests.map((r) => r.id === id ? { ...r, ...patch } : r));
-  }
-
-  function sendQuote() {
-    if (!priceInput.trim()) return;
-    update(sel.id, { status: "awaiting_client", quotedPrice: priceInput.trim() });
-    setPriceInput(""); setShowPriceInput(false);
-  }
-
-  function reject() {
-    update(sel.id, { status: "rejected" });
-    setShowRejectInput(false); setRejectNote("");
-  }
 
   return (
     <div className="p-4 md:p-6 max-w-6xl mx-auto">
@@ -53,8 +104,9 @@ export default function CustomRequests({ customRequests, onUpdateRequests }: Pro
         </p>
       </div>
 
+      {error && <div className="mb-4 bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
-        {/* List */}
+        {/* Lista izquierda */}
         <div className="lg:col-span-2 space-y-2.5">
           {customRequests.map((r) => {
             const s = STATUS_MAP[r.status];
@@ -64,7 +116,7 @@ export default function CustomRequests({ customRequests, onUpdateRequests }: Pro
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <span className="font-bold text-sm text-pink-500">{r.id}</span>
+                      <span className="font-bold text-sm text-pink-500">{r.id.substring(0,6)}</span>
                       <span className={`flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full border ${s.class}`}>
                         <s.Icon size={9} /> {s.label}
                       </span>
@@ -81,7 +133,7 @@ export default function CustomRequests({ customRequests, onUpdateRequests }: Pro
           })}
         </div>
 
-        {/* Detail */}
+        {/* Detalle derecha */}
         <div className="lg:col-span-3 bg-card rounded-3xl card-shadow border border-border p-5 md:p-6 flex flex-col justify-between min-h-[780px]">
           <div>
             <div className="flex items-center justify-between mb-5 pb-4 border-b border-border">
@@ -154,7 +206,7 @@ export default function CustomRequests({ customRequests, onUpdateRequests }: Pro
           </div>
 
           <div className="mt-auto pt-2">
-            {/* Actions */}
+            {/* Acciones */}
             {sel.status === "pending" && (
               <div className="space-y-3">
                 {showPriceInput ? (
@@ -169,7 +221,7 @@ export default function CustomRequests({ customRequests, onUpdateRequests }: Pro
                     </div>
                     <div className="flex gap-2">
                       <button onClick={() => setShowPriceInput(false)} className="flex-1 py-2.5 border-2 border-border text-muted-foreground font-bold rounded-xl text-sm hover:bg-muted transition-colors">Cancelar</button>
-                      <button onClick={sendQuote} disabled={!priceInput.trim()}
+                      <button onClick={sendQuote} disabled={!(Number(priceInput) > 0) || busy}
                         className="flex-1 py-2.5 bg-pink-500 hover:bg-pink-600 text-white font-bold rounded-xl text-sm disabled:opacity-40 flex items-center justify-center gap-2">
                         <Send size={13} /> Enviar cotización
                       </button>
@@ -182,7 +234,7 @@ export default function CustomRequests({ customRequests, onUpdateRequests }: Pro
                       className="w-full px-4 py-3 rounded-2xl border-2 border-border bg-muted focus:outline-none focus:border-pink-400 text-sm font-medium resize-none" />
                     <div className="flex gap-2">
                       <button onClick={() => setShowRejectInput(false)} className="flex-1 py-2.5 border-2 border-border text-foreground font-bold rounded-2xl text-sm">Cancelar</button>
-                      <button onClick={reject} className="flex-1 py-2.5 bg-white border-2 border-pink-400 text-pink-500 font-bold rounded-2xl text-sm flex items-center justify-center gap-2 hover:bg-pink-50 transition-colors">
+                      <button onClick={reject} disabled={busy} className="disabled:opacity-60 flex-1 py-2.5 bg-white border-2 border-pink-400 text-pink-500 font-bold rounded-2xl text-sm flex items-center justify-center gap-2 hover:bg-pink-50 transition-colors">
                         <XCircle size={14} /> Confirmar rechazo
                       </button>
                     </div>

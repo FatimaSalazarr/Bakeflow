@@ -1,19 +1,48 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
+import { api, getStoredUser, uploadImage } from "../../services/api";
 import { Mail, Phone, MapPin, User, Pencil, Check, Store, ImagePlus, X, Cake, Users, DollarSign, Lock, Eye, EyeOff, Star, AlertTriangle } from "lucide-react";
 
 interface Props { userName: string; onNavigate: (page: string) => void; }
 
 export default function BakeryProfile({ userName, onNavigate }: Props) {
   const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({
-    ownerName: userName,
-    bakeryName: "Dulcería Rosita",
-    email: "dulceria@mail.com",
-    phone: "+52 55 8765 4321",
-    address: "Av. Floresta 88, Col. Centro, CDMX",
-    city: "Ciudad de México",
-    description: "Pastelería artesanal especializada en pasteles kawaii y personalizados.",
-  });
+  const [form, setForm] = useState({ ownerName: userName, bakeryName: "", email: "", phone: "", address: "", description: "" });
+  const [bakeryId, setBakeryId] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [plan, setPlan] = useState({ name: "Gratuito", features: "", price: 0 });
+  const [stats, setStats] = useState({ orders: 0, employees: 0, income: 0 });
+
+  useEffect(() => {
+    const id = getStoredUser()?.bakeryId;
+    if (!id) { setLoadError("Tu cuenta no tiene una pastelería asociada."); return; }
+    setBakeryId(id);
+    Promise.all([
+      api<{ user: any }>("/auth/me"),
+      api<{ bakery: any }>(`/bakeries/${id}`),
+      api<{ plans: any[] }>("/plans"),
+      api<{ orders: any[] }>("/orders"),
+      api<{ users: any[] }>("/users"),
+      api<{ records: any[] }>("/finances"),
+    ])
+      .then(([{ user }, { bakery }, { plans }, { orders }, { users }, { records }]) => {
+        setForm({
+          ownerName: user.name, bakeryName: bakery.name, email: user.email, phone: bakery.phone || user.phone || "",
+          address: bakery.address || "", description: bakery.description || "",
+        });
+        setPhoto(bakery.logoUrl || "");
+        const active = bakery.subscription?.status === "active";
+        const current = plans.find((p) => p.key === (active ? bakery.subscription.plan : "basic"));
+        setPlan({ name: current ? `Plan ${current.name}` : "Plan Gratuito", features: (current?.features || []).join(" · "), price: current?.price || 0 });
+        const now = new Date();
+        const thisMonth = (iso: string) => { const d = new Date(iso); return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth(); };
+        setStats({
+          orders: orders.filter((o) => thisMonth(o.createdAt)).length,
+          employees: users.filter((u) => u.status === "active").length,
+          income: records.filter((r) => r.type === "income" && thisMonth(r.date)).reduce((s, r) => s + r.amount, 0),
+        });
+      })
+      .catch((e) => setLoadError(e.message));
+  }, []);
   const [photo, setPhoto] = useState("");
   const [saved, setSaved] = useState(false);
   const photoRef = useRef<HTMLInputElement>(null);
@@ -23,37 +52,55 @@ export default function BakeryProfile({ userName, onNavigate }: Props) {
   const [pwError, setPwError] = useState("");
   const [pwSaved, setPwSaved] = useState(false);
 
-  function changePassword(e: React.FormEvent) {
+  async function changePassword(e: React.FormEvent) {
     e.preventDefault();
-    if (pwForm.current !== "demo123") { setPwError("La contraseña actual es incorrecta."); return; }
     if (pwForm.next.length < 8) { setPwError("La nueva contraseña debe tener al menos 8 caracteres."); return; }
     if (pwForm.next !== pwForm.confirm) { setPwError("Las contraseñas no coinciden."); return; }
     setPwError("");
+    try {
+      await api("/users/password", { method: "PUT", body: { currentPassword: pwForm.current, newPassword: pwForm.next } });
+    } catch (err) {
+      setPwError(err instanceof Error ? err.message : "No se pudo cambiar la contraseña.");
+      return;
+    }
     setPwForm({ current: "", next: "", confirm: "" });
     setPwSaved(true);
     setTimeout(() => setPwSaved(false), 3000);
   }
 
-  function handlePhoto(e: React.ChangeEvent<HTMLInputElement>) {
+  // La foto es el logo de la pastelería: se sube al servidor y se guarda con "Guardar"
+  async function handlePhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => setPhoto(ev.target?.result as string);
-    reader.readAsDataURL(file);
+    setLoadError("");
+    try {
+      setPhoto(await uploadImage(file));
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "No se pudo subir la imagen.");
+    }
   }
 
-  function save() {
-    setEditing(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+  async function save() {
+    setLoadError("");
+    try {
+      const { user } = await api<{ user: any }>("/users/profile", { method: "PUT", body: { name: form.ownerName.trim(), phone: form.phone } });
+      await api(`/bakeries/${bakeryId}`, {
+        method: "PUT",
+        body: { name: form.bakeryName.trim(), description: form.description, address: form.address, phone: form.phone, logoUrl: photo },
+      });
+      localStorage.setItem("bakeflow_user", JSON.stringify({ ...getStoredUser(), name: user.name }));
+      setEditing(false);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "No se pudo guardar el perfil.");
+    }
   }
-
   const fields = [
     { key: "ownerName",    label: "Nombre del dueño",   type: "text",  Icon: User },
     { key: "bakeryName",   label: "Nombre pastelería",  type: "text",  Icon: Store },
     { key: "email",        label: "Correo electrónico", type: "email", Icon: Mail },
     { key: "phone",        label: "Teléfono",           type: "tel",   Icon: Phone },
     { key: "address",      label: "Dirección",          type: "text",  Icon: MapPin },
-    { key: "city",         label: "Ciudad",             type: "text",  Icon: MapPin },
     { key: "description",  label: "Descripción",        type: "text",  Icon: Store },
   ];
 
@@ -80,9 +127,9 @@ export default function BakeryProfile({ userName, onNavigate }: Props) {
             <Star size={20} className="text-white fill-white" />
           </div>
           <div className="flex-1">
-            <div className="font-bold text-foreground">Plan Pro</div>
-            <div className="text-xs text-muted-foreground">Pedidos ilimitados · Finanzas · Estadísticas</div>
-            <div className="text-xs font-bold text-pink-500 mt-0.5">$199 / mes</div>
+            <div className="font-bold text-foreground">{plan.name}</div>
+            <div className="text-xs text-muted-foreground">{plan.features}</div>
+            <div className="text-xs font-bold text-pink-500 mt-0.5">{plan.price > 0 ? `$${plan.price} / mes` : "Sin costo"}</div>
           </div>
           <button onClick={() => onNavigate("subscription")}
             className="px-4 py-2 bg-pink-500 hover:bg-pink-600 text-white font-bold text-xs rounded-xl transition-colors shrink-0">
@@ -94,9 +141,9 @@ export default function BakeryProfile({ userName, onNavigate }: Props) {
       {/* Estadísticas abajo de el plan */}
       <div className="grid grid-cols-3 gap-4 mb-5">
         {[
-          { label: "Pedidos este mes", value: "34", Icon: Cake },
-          { label: "Empleados activos", value: "5", Icon: Users },
-          { label: "Ingresos mensuales", value: "$18k", Icon: DollarSign },
+          { label: "Pedidos este mes", value: String(stats.orders), Icon: Cake },
+          { label: "Empleados activos", value: String(stats.employees), Icon: Users },
+          { label: "Ingresos mensuales", value: `$${Math.round(stats.income).toLocaleString()}`, Icon: DollarSign },
         ].map(({ label, value, Icon }) => (
           <div key={label} className="bg-card rounded-3xl card-shadow border border-border p-4 text-center">
             <div className="flex justify-center mb-1">
@@ -108,6 +155,7 @@ export default function BakeryProfile({ userName, onNavigate }: Props) {
         ))}
       </div>
 
+      {loadError && <div className="mb-5 bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{loadError}</div>}
       {saved && (
         <div className="mb-5 bg-green-50 border border-green-200 text-green-700 px-5 py-3 rounded-2xl font-bold text-sm flex items-center gap-2">
           <Check size={16} /> Cambios guardados correctamente
@@ -175,7 +223,7 @@ export default function BakeryProfile({ userName, onNavigate }: Props) {
                 <Icon size={13} className="text-pink-400" /> {label}
               </label>
               {editing ? (
-                <input type={type} value={form[key as keyof typeof form]}
+                <input type={type} disabled={key === "email"} value={form[key as keyof typeof form]}
                   onChange={(e) => setForm({ ...form, [key]: e.target.value })}
                   className="w-full px-4 py-3 rounded-2xl border-2 border-border bg-muted focus:outline-none focus:border-pink-400 transition-colors text-sm font-medium" />
               ) : (

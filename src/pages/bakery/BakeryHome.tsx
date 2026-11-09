@@ -1,3 +1,6 @@
+import { useState, useEffect } from "react";
+import { api } from "../../services/api";
+import { isDeadStatus, orderCode, orderTitle, clientName } from "../../services/orders";
 import { Package, DollarSign, Clock, Users, Cake, Calendar, Sparkles, BarChart2, ArrowRight, Star, TrendingUp } from "lucide-react";
 
 interface Props {
@@ -5,14 +8,45 @@ interface Props {
   onNavigate: (page: string) => void;
 }
 
-export default function BakeryHome({ userName, onNavigate }: Props) {
-  const stats = [
-    { label: "Pedidos este mes",   value: "34",     sub: "+8 vs agosto",    Icon: Package,    color: "bg-pink-500",   trend: "+31%" },
-    { label: "Ingresos del mes",   value: "$18,240", sub: "+12% vs agosto", Icon: DollarSign, color: "bg-violet-500", trend: "+12%" },
-    { label: "Pedidos pendientes", value: "7",       sub: "Requieren atención", Icon: Clock,  color: "bg-amber-400",  trend: null },
-    { label: "Clientes activos",   value: "23",      sub: "Este mes",        Icon: Users,      color: "bg-indigo-500", trend: "+5" },
-  ];
+const money = (n: number) => "$" + Math.round(n).toLocaleString();
+const sameMonth = (iso: string, ref: Date) => { const d = new Date(iso); return d.getFullYear() === ref.getFullYear() && d.getMonth() === ref.getMonth(); };
+function trendOf(cur: number, prev: number): string | null {
+  if (prev <= 0) return null;
+  const pct = Math.round(((cur - prev) / prev) * 100);
+  return `${pct >= 0 ? "+" : ""}${pct}%`;
+}
 
+export default function BakeryHome({ userName, onNavigate }: Props) {
+  const [orders, setOrders] = useState<any[]>([]);
+  const [records, setRecords] = useState<any[]>([]);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    Promise.all([api<{ orders: any[] }>("/orders"), api<{ records: any[] }>("/finances")])
+      .then(([o, f]) => { setOrders(o.orders); setRecords(f.records); })
+      .catch((e) => setError(e.message));
+  }, []);
+
+  const now = new Date();
+  const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const monthName = now.toLocaleDateString("es-MX", { month: "long", year: "numeric" });
+  const prevName = prevMonth.toLocaleDateString("es-MX", { month: "long" });
+
+  const ordersNow = orders.filter((o) => sameMonth(o.createdAt, now));
+  const ordersPrev = orders.filter((o) => sameMonth(o.createdAt, prevMonth));
+  const incomeOf = (ref: Date) => records.filter((r) => r.type === "income" && sameMonth(r.date, ref)).reduce((s, r) => s + r.amount, 0);
+  const incomeNow = incomeOf(now);
+  const incomePrev = incomeOf(prevMonth);
+  const pendingCount = orders.filter((o) => o.status === "pending" || o.status === "pending_quote").length;
+  const activeCustomers = new Set(ordersNow.map((o) => o.customerId?._id).filter(Boolean)).size;
+  const diff = ordersNow.length - ordersPrev.length;
+
+  const stats = [
+    { label: "Pedidos este mes",   value: String(ordersNow.length), sub: `${diff >= 0 ? "+" : ""}${diff} vs ${prevName}`, Icon: Package, color: "bg-pink-500", trend: trendOf(ordersNow.length, ordersPrev.length) },
+    { label: "Ingresos del mes",   value: money(incomeNow), sub: `vs ${money(incomePrev)} en ${prevName}`, Icon: DollarSign, color: "bg-violet-500", trend: trendOf(incomeNow, incomePrev) },
+    { label: "Pedidos pendientes", value: String(pendingCount), sub: "Requieren atención", Icon: Clock, color: "bg-amber-400", trend: null },
+    { label: "Clientes activos",   value: String(activeCustomers), sub: "Este mes", Icon: Users, color: "bg-indigo-500", trend: null },
+  ];
   const quickActions = [
     { Icon: Cake,     label: "Gestionar menú",    page: "menu-mgmt",       desc: "Agrega o edita productos" },
     { Icon: Calendar, label: "Ver calendario",    page: "orders-cal",       desc: "Pedidos programados" },
@@ -20,12 +54,15 @@ export default function BakeryHome({ userName, onNavigate }: Props) {
     { Icon: BarChart2, label: "Finanzas",          page: "finances",         desc: "Ingresos y gastos" },
   ];
 
-  const pending = [
-    { id: "#1045", client: "Valentina Ruiz",  cake: "Pastel de bodas",    date: "15 Sep", employee: "Sin asignar" },
-    { id: "#1043", client: "Carlos Mendoza",  cake: "Pastel de cumpleaños", date: "12 Sep", employee: "Sofía L." },
-    { id: "#1044", client: "Andrea Torres",   cake: "Cupcakes x24",       date: "11 Sep", employee: "Mia R." },
-  ];
-
+  // Próximas entregas: pedidos vivos ordenados por fecha de entrega (el backend ya los ordena)
+  const pending = orders
+    .filter((o) => !isDeadStatus(o.status) && o.status !== "delivered")
+    .slice(0, 5)
+    .map((o) => ({
+      id: orderCode(o), client: clientName(o), cake: orderTitle(o),
+      date: new Date(o.deliveryDate).toLocaleDateString("es-MX", { day: "numeric", month: "short" }),
+      employee: o.assignedEmployeeId?.name || "Sin asignar",
+    }));
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 md:px-6 space-y-8">
 
@@ -39,7 +76,7 @@ export default function BakeryHome({ userName, onNavigate }: Props) {
             <h1 className="font-display text-3xl md:text-4xl font-bold text-white mt-0.5">
               Hola, {userName.split(" ")[0]}!
             </h1>
-            <p className="text-white/80 text-sm mt-2 font-medium">Resumen de tu pastelería — Septiembre 2026</p>
+            <p className="text-white/80 text-sm mt-2 font-medium">Resumen de tu pastelería — {monthName}</p>
           </div>
           <div className="shrink-0 flex items-center gap-2 px-4 py-2.5 bg-white/20 border border-white/30 rounded-2xl backdrop-blur-sm">
             <Star size={14} className="text-amber-300 fill-amber-300" />
@@ -48,6 +85,8 @@ export default function BakeryHome({ userName, onNavigate }: Props) {
           </div>
         </div>
       </div>
+
+      {error && <div className="bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
 
       {/* ── KPI CARDS ───────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
@@ -99,6 +138,7 @@ export default function BakeryHome({ userName, onNavigate }: Props) {
           <div className="grid grid-cols-5 gap-3 px-5 py-3 bg-muted text-xs font-bold text-muted-foreground">
             <span>Pedido</span><span className="col-span-2">Cliente / Descripción</span><span>Fecha</span><span>Empleado</span>
           </div>
+          {pending.length === 0 && <div className="px-5 py-6 text-sm text-muted-foreground">No hay entregas próximas.</div>}
           {pending.map((o, i) => (
             <div key={o.id} className={`grid grid-cols-5 gap-3 px-5 py-4 items-center ${i < pending.length - 1 ? "border-b border-border" : ""}`}>
               <span className="font-bold text-sm text-pink-500">{o.id}</span>

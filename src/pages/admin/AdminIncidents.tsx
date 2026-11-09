@@ -1,17 +1,27 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { api } from "../../services/api";
 import { AlertTriangle, ShieldAlert, MessageSquare, CheckCircle2, Search, BarChart2, Store } from "lucide-react";
 
-const INCIDENTS = [
-  { id: "INC-001", type: "report", title: "Pastelería no entregó pedido", reporter: "Luna García", bakery: "Sweet Dreams", status: "open", date: "9 Sep", desc: "El cliente reporta que su pedido #1031 nunca fue entregado a pesar de haber pagado." },
-  { id: "INC-002", type: "fraud", title: "Posible fraude en pagos", reporter: "Sistema", bakery: "Boulangerie MX", status: "investigating", date: "7 Sep", desc: "Se detectaron múltiples transacciones sospechosas en un periodo de 2 horas." },
-  { id: "INC-003", type: "complaint", title: "Empleado con acceso no autorizado", reporter: "Dulcería Rosita", bakery: "Dulcería Rosita", status: "resolved", date: "5 Sep", desc: "Un exempleado seguía teniendo acceso al panel de la pastelería tras ser dado de baja." },
-  { id: "INC-004", type: "report", title: "Producto fuera del menú cobrado", reporter: "Carlos Mendoza", bakery: "Cakes & More", status: "open", date: "3 Sep", desc: "El cliente fue cobrado por un producto que no aparecía en el menú oficial." },
-];
+interface IncidentRow { id: string; dbId: string; type: string; title: string; reporter: string; bakery: string; status: string; date: string; desc: string; }
 
+// Estado del backend (in_review) <-> estado que muestra la pantalla (investigating)
+const toUiStatus = (s: string) => (s === "in_review" ? "investigating" : s);
+const toDbStatus = (s: string) => (s === "investigating" ? "in_review" : s);
+
+function toRow(i: any): IncidentRow {
+  return {
+    id: "INC-" + String(i._id).slice(-6).toUpperCase(), dbId: i._id, type: i.type || "report", title: i.title,
+    reporter: i.reportedBy?.name || "Sistema", bakery: i.bakeryId?.name || "—", status: toUiStatus(i.status),
+    date: new Date(i.createdAt).toLocaleDateString("es-MX", { day: "numeric", month: "short" }), desc: i.description,
+  };
+}
 const TYPE_META: Record<string, { label: string; class: string; Icon: React.ComponentType<{ size?: number }> }> = {
   report: { label: "Reporte", class: "bg-pink-50 text-pink-700", Icon: AlertTriangle },
   fraud: { label: "Fraude", class: "bg-rose-50 text-rose-700", Icon: ShieldAlert },
   complaint: { label: "Queja", class: "bg-violet-50 text-violet-700", Icon: MessageSquare },
+  technical: { label: "Técnico", class: "bg-indigo-50 text-indigo-700", Icon: ShieldAlert },
+  payment: { label: "Pago", class: "bg-pink-50 text-pink-700", Icon: AlertTriangle },
+  other: { label: "Otro", class: "bg-muted text-muted-foreground", Icon: MessageSquare },
 };
 
 const STATUS_MAP: Record<string, { label: string; class: string }> = {
@@ -20,16 +30,43 @@ const STATUS_MAP: Record<string, { label: string; class: string }> = {
   resolved: { label: "Resuelta", class: "badge-ready" },
 };
 
-const BAKERY_NAMES = [...new Set(INCIDENTS.map((i) => i.bakery))];
 
 export default function AdminIncidents() {
-  const [incidents, setIncidents] = useState(INCIDENTS);
-  const [selected, setSelected] = useState(INCIDENTS[0].id);
+  const [incidents, setIncidents] = useState<IncidentRow[]>([]);
+  const [selected, setSelected] = useState("");
   const [tab, setTab] = useState<"list" | "report">("list");
   const [reportSearch, setReportSearch] = useState("");
-  const sel = incidents.find((i) => i.id === selected)!;
-  const SelTypeIcon = TYPE_META[sel.type].Icon;
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    api<{ incidents: any[] }>("/incidents")
+      .then(({ incidents }) => {
+        const rows = incidents.map(toRow);
+        setIncidents(rows);
+        setSelected(rows[0]?.id ?? "");
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const sel = incidents.find((i) => i.id === selected) ?? incidents[0];
+  const SelTypeIcon = sel ? (TYPE_META[sel.type] ?? TYPE_META.report).Icon : AlertTriangle;
+  const BAKERY_NAMES = [...new Set(incidents.map((i) => i.bakery))];
+
+  async function setStatus(row: IncidentRow, status: string) {
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/incidents/${row.dbId}`, { method: "PUT", body: { status: toDbStatus(status) } });
+      setIncidents((prev) => prev.map((i) => i.id === row.id ? { ...i, status } : i));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo actualizar la incidencia.");
+    } finally {
+      setBusy(false);
+    }
+  }
   const bakeryReport = BAKERY_NAMES.map((name) => {
     const inc = incidents.filter((i) => i.bakery === name);
     return {
@@ -50,6 +87,8 @@ export default function AdminIncidents() {
         </h1>
         <p className="text-muted-foreground text-sm mt-1 font-medium">{incidents.filter((i) => i.status === "open").length} abiertas</p>
       </div>
+
+      {error && <div className="mb-4 bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
 
       {/* Tabs */}
       <div className="flex gap-2 mb-6">
@@ -112,7 +151,7 @@ export default function AdminIncidents() {
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         <div className="lg:col-span-2 space-y-3">
           {incidents.map((inc) => {
-            const meta = TYPE_META[inc.type];
+            const meta = TYPE_META[inc.type] ?? TYPE_META.report;
             return (
               <button key={inc.id} onClick={() => setSelected(inc.id)}
                 className={`w-full text-left p-4 rounded-3xl border-2 transition-all ${selected === inc.id ? "border-pink-400 bg-pink-50" : "border-border bg-card hover:border-pink-200 card-shadow"}`}>
@@ -134,13 +173,14 @@ export default function AdminIncidents() {
           })}
         </div>
 
+        {sel ? (
         <div className="lg:col-span-3 bg-card rounded-3xl card-shadow border border-border p-6 h-fit">
           <div className="flex items-center justify-between mb-5 pb-5 border-b border-border">
             <div>
                   <div className="flex items-center gap-2">
                 <h2 className="font-display text-lg font-semibold text-foreground">{sel.title}</h2>
-                <span className={`flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full ${TYPE_META[sel.type].class}`}>
-                  <SelTypeIcon size={10} /> {TYPE_META[sel.type].label}
+                <span className={`flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full ${(TYPE_META[sel.type] ?? TYPE_META.report).class}`}>
+                  <SelTypeIcon size={10} /> {(TYPE_META[sel.type] ?? TYPE_META.report).label}
                 </span>
               </div>
               <div className="text-sm text-muted-foreground font-medium">{sel.id} · {sel.date}</div>
@@ -167,18 +207,23 @@ export default function AdminIncidents() {
           {sel.status !== "resolved" && (
             <div className="flex gap-3">
               {sel.status === "open" && (
-                <button onClick={() => setIncidents((prev) => prev.map((i) => i.id === sel.id ? { ...i, status: "investigating" } : i))}
+                <button onClick={() => setStatus(sel, "investigating")} disabled={busy}
                   className="flex-1 flex items-center justify-center gap-2 py-3 bg-violet-50 text-violet-600 border border-violet-200 font-bold rounded-2xl text-sm hover:bg-violet-100 transition-colors">
                   <Search size={14} /> Investigar
                 </button>
               )}
-              <button onClick={() => setIncidents((prev) => prev.map((i) => i.id === sel.id ? { ...i, status: "resolved" } : i))}
+              <button onClick={() => setStatus(sel, "resolved")} disabled={busy}
                 className="flex-1 flex items-center justify-center gap-2 py-3 bg-pink-50 text-pink-600 border border-pink-200 font-bold rounded-2xl text-sm hover:bg-pink-100 transition-colors">
                 <CheckCircle2 size={14} /> Resolver
               </button>
             </div>
           )}
         </div>
+        ) : (
+          <div className="lg:col-span-3 bg-card rounded-3xl card-shadow border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+            {loading ? "Cargando incidencias..." : "No hay incidencias registradas."}
+          </div>
+        )}
       </div>
       )}
     </div>
