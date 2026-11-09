@@ -5,13 +5,22 @@ const rateLimit = require('express-rate-limit');
 
 const app = express();
 
+// Detrás del proxy de Render/Railway: necesario para que el rate-limit lea la IP real del cliente
+app.set('trust proxy', 1);
+
 // 1. Cabeceras de seguridad HTTP
 // crossOriginResourcePolicy abierto: el frontend (otro origen) debe poder mostrar las imágenes subidas
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 
 // 2. Configurar CORS (permite peticiones desde tu Vite local y tu GitHub Pages)
+// FRONTEND_URL admite varios orígenes separados por coma (sin "/" final)
+const allowedOrigins = [
+  'http://localhost:5173',
+  'https://fatimasalazarr.github.io',
+  ...(process.env.FRONTEND_URL || '').split(',').map((o) => o.trim().replace(/\/$/, '')).filter(Boolean)
+];
 app.use(cors({
-  origin: [process.env.FRONTEND_URL || 'http://localhost:5173', 'https://fatimasalazarr.github.io'],
+  origin: (origin, cb) => cb(null, !origin || allowedOrigins.includes(origin)),
   credentials: true
 }));
 

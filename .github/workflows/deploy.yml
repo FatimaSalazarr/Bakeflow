@@ -3,6 +3,7 @@ name: Deploy Vite App to GitHub Pages
 on:
   push:
     branches: ["main"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -28,15 +29,25 @@ jobs:
         with:
           node-version: 20
 
+      - name: Check API URL
+        run: |
+          if [ -z "$VITE_API_URL" ]; then
+            echo "::error::Falta la variable VITE_API_URL (Settings > Secrets and variables > Actions > Variables), p. ej. https://bakeflow-api.onrender.com/api"
+            exit 1
+          fi
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+
       - name: Install dependencies
         run: npm install
 
       - name: Build
         run: npm run build
         env:
-          # URL pública del backend, p. ej. https://bakeflow-api.onrender.com/api
-          # Definir en: Settings > Secrets and variables > Actions > Variables
           VITE_API_URL: ${{ vars.VITE_API_URL }}
+
+      - name: SPA fallback
+        run: cp dist/index.html dist/404.html
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
