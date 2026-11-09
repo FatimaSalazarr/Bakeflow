@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { api } from "../../services/api";
 import { AlertTriangle, Plus, X, Clock, CheckCircle2, ShieldAlert, MessageSquare, Send } from "lucide-react";
 
 type IncidentStatus = "open" | "in_review" | "resolved";
 type IncidentType = "technical" | "payment" | "complaint" | "other";
 
 interface Incident {
-  id: string; type: IncidentType; title: string; desc: string;
+  id: string; dbId: string; type: IncidentType; title: string; desc: string;
   status: IncidentStatus; date: string; adminNote?: string;
 }
 
@@ -22,11 +23,14 @@ const STATUS_UI: Record<IncidentStatus, { label: string; class: string; Icon: Re
   resolved:  { label: "Resuelto",     class: "badge-ready",    Icon: CheckCircle2 },
 };
 
-const INITIAL: Incident[] = [
-  { id: "INC-B01", type: "payment", title: "Cobro duplicado en suscripción", desc: "Se realizó un cobro doble el 1 de septiembre por el plan Pro. El monto es de $199 dos veces.", status: "in_review", date: "2 Sep 2026", adminNote: "Estamos revisando el cargo con el procesador de pagos. Respuesta en 48h." },
-  { id: "INC-B02", type: "technical", title: "No puedo acceder al calendario", desc: "Desde ayer el calendario no carga en Safari. Afecta a los pedidos del equipo.", status: "resolved", date: "31 Ago 2026", adminNote: "Solucionado. Era un problema de compatibilidad con Safari 17. Actualiza el navegador." },
-];
-
+function toIncident(i: any): Incident {
+  return {
+    id: "INC-" + String(i._id).slice(-6).toUpperCase(), dbId: i._id, type: (TYPE_META[i.type as IncidentType] ? i.type : "other") as IncidentType,
+    title: i.title, desc: i.description, status: i.status,
+    date: new Date(i.createdAt).toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" }),
+    adminNote: i.adminResolution || undefined,
+  };
+}
 const TYPE_OPTIONS: { value: IncidentType; label: string }[] = [
   { value: "technical", label: "Problema técnico" },
   { value: "payment",   label: "Problema de pago" },
@@ -35,25 +39,46 @@ const TYPE_OPTIONS: { value: IncidentType; label: string }[] = [
 ];
 
 export default function BakeryIncidents() {
-  const [incidents, setIncidents] = useState<Incident[]>(INITIAL);
-  const [selected, setSelected] = useState<string>(INITIAL[0].id);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [selected, setSelected] = useState<string>("");
   const [showNew, setShowNew] = useState(false);
   const [form, setForm] = useState<{ type: IncidentType; title: string; desc: string }>({ type: "technical", title: "", desc: "" });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [sending, setSending] = useState(false);
 
-  const sel = incidents.find(i => i.id === selected)!;
+  useEffect(() => {
+    api<{ incidents: any[] }>("/incidents")
+      .then(({ incidents }) => {
+        const list = incidents.map(toIncident);
+        setIncidents(list);
+        setSelected(list[0]?.id ?? "");
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
 
-  function submit() {
+  const sel = incidents.find(i => i.id === selected);
+
+  async function submit() {
     if (!form.title.trim() || !form.desc.trim()) return;
-    const newInc: Incident = {
-      id: `INC-B${String(incidents.length + 1).padStart(2, "0")}`,
-      ...form, status: "open", date: "11 Sep 2026",
-    };
-    setIncidents(prev => [newInc, ...prev]);
-    setSelected(newInc.id);
-    setForm({ type: "technical", title: "", desc: "" });
-    setShowNew(false);
+    setSending(true);
+    setError("");
+    try {
+      const { incident } = await api<{ incident: any }>("/incidents", {
+        method: "POST", body: { type: form.type, title: form.title.trim(), description: form.desc.trim() },
+      });
+      const newInc = toIncident(incident);
+      setIncidents(prev => [newInc, ...prev]);
+      setSelected(newInc.id);
+      setForm({ type: "technical", title: "", desc: "" });
+      setShowNew(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo enviar la incidencia.");
+    } finally {
+      setSending(false);
+    }
   }
-
   const openCount = incidents.filter(i => i.status === "open").length;
 
   return (
@@ -73,6 +98,9 @@ export default function BakeryIncidents() {
         </button>
       </div>
 
+      {error && <div className="mb-4 bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
+      {loading && <p className="mb-4 text-sm text-muted-foreground">Cargando incidencias...</p>}
+      {!loading && incidents.length === 0 && <p className="mb-4 text-sm text-muted-foreground">No has reportado incidencias.</p>}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
         {/* List */}
         <div className="lg:col-span-2 space-y-2.5">
@@ -184,7 +212,7 @@ export default function BakeryIncidents() {
               </div>
               <div className="flex gap-3 pt-1">
                 <button onClick={() => setShowNew(false)} className="flex-1 py-3 border-2 border-border text-foreground font-bold rounded-2xl hover:bg-muted text-sm transition-colors">Cancelar</button>
-                <button onClick={submit} disabled={!form.title.trim() || !form.desc.trim()}
+                <button onClick={submit} disabled={sending || !form.title.trim() || !form.desc.trim()}
                   className="flex-1 py-3 bg-pink-500 hover:bg-pink-600 text-white font-bold rounded-2xl shadow-md disabled:opacity-40 flex items-center justify-center gap-2 text-sm">
                   <Send size={13} /> Enviar reporte
                 </button>

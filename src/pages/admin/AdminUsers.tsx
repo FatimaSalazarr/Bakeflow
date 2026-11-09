@@ -1,17 +1,15 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { api } from "../../services/api";
 import { Search, ShoppingBag, Store, Users, User, ShieldOff, ShieldCheck, Plus, X, Mail, Phone, Lock } from "lucide-react";
 
-const INITIAL_USERS = [
-  { id: 1, name: "Luna García",      email: "luna@mail.com",          role: "customer",  bakery: "-",               status: "active",  date: "5 Sep" },
-  { id: 2, name: "Rosa Martínez",    email: "dulceria@rosita.com",    role: "bakery",    bakery: "Dulcería Rosita",  status: "active",  date: "8 Sep" },
-  { id: 3, name: "Sofía López",      email: "sofia@rosita.com",       role: "employee",  bakery: "Dulcería Rosita",  status: "active",  date: "2 Sep" },
-  { id: 4, name: "Carlos Mendoza",   email: "carlos@mail.com",        role: "customer",  bakery: "-",               status: "active",  date: "3 Sep" },
-  { id: 5, name: "Valentina Ríos",   email: "luna@pasteles.com",      role: "bakery",    bakery: "Pastelería Luna",  status: "active",  date: "6 Sep" },
-  { id: 6, name: "Andrea Torres",    email: "andrea@mail.com",        role: "customer",  bakery: "-",               status: "blocked", date: "1 Sep" },
-  { id: 7, name: "Admin Principal",  email: "admin@bakeflow.com",     role: "admin",     bakery: "-",               status: "active",  date: "1 Ene" },
-  { id: 8, name: "Mia Ramírez",      email: "mia@rosita.com",         role: "employee",  bakery: "Dulcería Rosita",  status: "active",  date: "5 Sep" },
-];
+interface UserRow { id: string; name: string; email: string; role: string; bakery: string; status: string; date: string; }
 
+function toRow(u: any): UserRow {
+  return {
+    id: u._id, name: u.name, email: u.email, role: u.role, bakery: u.bakeryId?.name || "-", status: u.status,
+    date: new Date(u.createdAt).toLocaleDateString("es-MX", { day: "numeric", month: "short" }),
+  };
+}
 const ROLE_META: Record<string, { label: string; class: string; Icon: React.ComponentType<{ size?: number }> }> = {
   customer: { label: "Cliente",    class: "bg-pink-50 text-pink-600",    Icon: ShoppingBag },
   bakery:   { label: "Pastelería", class: "bg-violet-50 text-violet-600", Icon: Store },
@@ -24,7 +22,17 @@ const BLANK = { name: "", email: "", phone: "", role: "admin", bakery: "", passw
 type TabType = "admins" | "clients";
 
 export default function AdminUsers() {
-  const [users, setUsers] = useState(INITIAL_USERS);
+  const [users, setUsers] = useState<UserRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api<{ users: any[] }>("/users")
+      .then(({ users }) => setUsers(users.map(toRow)))
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const [activeTab, setActiveTab] = useState<TabType>("admins");
@@ -43,25 +51,44 @@ export default function AdminUsers() {
     return matchSearch && matchRole;
   });
 
-  function toggleBlock(id: number) {
-    setUsers((prev) => prev.map((u) => u.id === id ? { ...u, status: u.status === "blocked" ? "active" : "blocked" } : u));
+  // Bloquear / desbloquear: el usuario bloqueado ya no puede iniciar sesión ni usar la API
+  async function toggleBlock(id: string) {
+    const user = users.find((u) => u.id === id);
+    if (!user) return;
+    const status = user.status === "active" ? "blocked" : "active";
+    setError("");
+    try {
+      await api(`/users/${id}/status`, { method: "PATCH", body: { status } });
+      setUsers((prev) => prev.map((u) => u.id === id ? { ...u, status } : u));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo cambiar el estado del usuario.");
+    }
   }
-
   function setF(key: string, val: string) {
     setForm((p) => ({ ...p, [key]: val }));
   }
 
-  function createUser(e: React.FormEvent) {
+  async function createUser(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name || !form.email || !form.password) { setFormError("Nombre, correo y contraseña son obligatorios."); return; }
-    const today = new Date();
-    const dateStr = `${today.getDate()} ${["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"][today.getMonth()]}`;
-    setUsers((prev) => [...prev, { id: Date.now(), name: form.name, email: form.email, role: form.role, bakery: form.bakery || "-", status: "active", date: dateStr }]);
-    setForm(BLANK);
-    setFormError("");
-    setShowModal(false);
+    if (form.password.length < 6) { setFormError("La contraseña debe tener mínimo 6 caracteres."); return; }
+    setSaving(true);
+    try {
+      const { user } = await api<{ user: any }>("/users", {
+        method: "POST",
+        body: { name: form.name.trim(), email: form.email.trim(), phone: form.phone, role: form.role, password: form.password, bakeryName: form.bakery.trim() },
+      });
+      // El backend devuelve el usuario sin la pastelería poblada: se completa con el nombre indicado
+      setUsers((prev) => [...prev, { ...toRow(user), bakery: form.bakery.trim() || (form.role === "bakery" ? form.name : "-") }]);
+      setForm(BLANK);
+      setFormError("");
+      setShowModal(false);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "No se pudo crear el usuario.");
+    } finally {
+      setSaving(false);
+    }
   }
-
   const clientRoleOptions = [["all", "Todos"], ["bakery", "Pastelerías"], ["employee", "Empleados"], ["customer", "Clientes"]];
 
   return (
@@ -78,6 +105,9 @@ export default function AdminUsers() {
           <Plus size={15} /> Crear usuario
         </button>
       </div>
+
+      {error && <div className="mb-4 bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
+      {loading && <p className="mb-4 text-sm text-muted-foreground">Cargando usuarios...</p>}
 
       {/* Tabs */}
       <div className="flex gap-2 mb-5">
@@ -219,7 +249,7 @@ export default function AdminUsers() {
                   className="flex-1 py-3 border-2 border-border text-foreground font-bold rounded-2xl hover:bg-muted transition-colors text-sm">
                   Cancelar
                 </button>
-                <button type="submit"
+                <button type="submit" disabled={saving}
                   className="flex-1 py-3 bg-pink-500 hover:bg-pink-600 text-white font-bold rounded-2xl shadow-md transition-all text-sm flex items-center justify-center gap-2">
                   <Plus size={14} /> Crear usuario
                 </button>

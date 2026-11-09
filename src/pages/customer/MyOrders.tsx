@@ -1,38 +1,37 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Clock, ChefHat, CheckCircle2, PartyPopper, XCircle, Cake } from "lucide-react";
+import { api } from "../../services/api";
 
-const ORDERS = [
-  {
-    id: "#1042", name: "Pastel de fresa", status: "progress", date: "10 Sep 2026", delivery: "13 Sep 2026", total: "$480",
-    steps: [
-      { label: "Pedido recibido", done: true, time: "10 Sep, 10:00" },
-      { label: "En preparación", done: true, time: "11 Sep, 09:00" },
-      { label: "Decorando", done: false, time: "" },
-      { label: "Listo para recoger", done: false, time: "" },
-      { label: "Entregado", done: false, time: "" },
-    ],
-  },
-  {
-    id: "#1038", name: "Pastel personalizado Unicornio", status: "ready", date: "7 Sep 2026", delivery: "9 Sep 2026", total: "$650",
-    steps: [
-      { label: "Pedido recibido", done: true, time: "7 Sep, 14:00" },
-      { label: "Aprobado", done: true, time: "7 Sep, 16:00" },
-      { label: "En preparación", done: true, time: "8 Sep, 08:00" },
-      { label: "Listo para recoger", done: true, time: "9 Sep, 12:00" },
-      { label: "Entregado", done: false, time: "" },
-    ],
-  },
-  {
-    id: "#1031", name: "Cupcakes de vainilla x12", status: "delivered", date: "2 Sep 2026", delivery: "3 Sep 2026", total: "$240",
-    steps: [
-      { label: "Pedido recibido", done: true, time: "2 Sep, 11:00" },
-      { label: "En preparación", done: true, time: "2 Sep, 15:00" },
-      { label: "Listo para recoger", done: true, time: "3 Sep, 10:00" },
-      { label: "Entregado", done: true, time: "3 Sep, 14:00" },
-    ],
-  },
+interface Step { label: string; done: boolean; time: string; }
+interface OrderView { id: string; name: string; status: string; date: string; delivery: string; total: string; steps: Step[]; }
+
+const FLOW = [
+  { label: "Pedido recibido", statuses: ["pending_quote", "pending", "in_preparation", "ready", "delivered"] },
+  { label: "En preparación", statuses: ["in_preparation", "ready", "delivered"] },
+  { label: "Listo para recoger", statuses: ["ready", "delivered"] },
+  { label: "Entregado", statuses: ["delivered"] },
 ];
 
+const fmtDate = (d: string) => new Date(d).toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" });
+
+function toView(o: any): OrderView {
+  const status = o.status === "in_preparation" ? "progress"
+    : ["pending_quote", "awaiting_client"].includes(o.status) ? "pending"
+    : ["rejected", "declined"].includes(o.status) ? "cancelled" : o.status;
+  const name = o.orderType === "custom"
+    ? "Pastel personalizado"
+    : (o.items || []).map((i: any) => i.quantity > 1 ? `${i.name} x${i.quantity}` : i.name).join(", ") || "Pedido";
+  return {
+    id: "#" + String(o._id).slice(-6).toUpperCase(),
+    name, status,
+    date: fmtDate(o.createdAt),
+    delivery: fmtDate(o.deliveryDate),
+    total: `$${o.totalPrice}`,
+    steps: ["cancelled", "rejected", "declined"].includes(o.status)
+      ? [{ label: "Cancelado", done: true, time: "" }]
+      : FLOW.map((s) => ({ label: s.label, done: s.statuses.includes(o.status), time: "" })),
+  };
+}
 const STATUS_MAP: Record<string, { label: string; class: string; Icon: React.ComponentType<{ size?: number }> }> = {
   pending: { label: "Pendiente", class: "badge-pending", Icon: Clock },
   progress: { label: "En proceso", class: "badge-progress", Icon: ChefHat },
@@ -42,8 +41,23 @@ const STATUS_MAP: Record<string, { label: string; class: string; Icon: React.Com
 };
 
 export default function MyOrders() {
-  const [selected, setSelected] = useState<string | null>("#1042");
-  const selectedOrder = ORDERS.find((o) => o.id === selected);
+  const [orders, setOrders] = useState<OrderView[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [selected, setSelected] = useState<string | null>(null);
+
+  useEffect(() => {
+    api<{ orders: any[] }>("/orders")
+      .then(({ orders }) => {
+        const views = orders.map(toView);
+        setOrders(views);
+        setSelected(views[0]?.id ?? null);
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const selectedOrder = orders.find((o) => o.id === selected);
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -54,7 +68,10 @@ export default function MyOrders() {
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         <div className="lg:col-span-2 space-y-3">
-          {ORDERS.map((order) => {
+          {error && <div className="bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
+          {loading && <p className="text-sm text-muted-foreground">Cargando pedidos...</p>}
+          {!loading && !error && orders.length === 0 && <p className="text-sm text-muted-foreground">Aún no tienes pedidos.</p>}
+          {orders.map((order) => {
             const s = STATUS_MAP[order.status];
             return (
               <button key={order.id} onClick={() => setSelected(order.id)}

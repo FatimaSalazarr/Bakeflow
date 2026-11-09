@@ -1,40 +1,43 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { api } from "../../services/api";
 import { TrendingUp, Lock, DollarSign, Star, Flower2, Crown, Filter } from "lucide-react";
 
-const ALL_DATA: Record<string, { month: string; revenue: number; orders: number; bakeries: number }[]> = {
-  "2025": [
-    { month: "Jul", revenue: 18000, orders: 1420, bakeries: 98 },
-    { month: "Ago", revenue: 21000, orders: 1580, bakeries: 110 },
-    { month: "Sep", revenue: 23500, orders: 1720, bakeries: 125 },
-    { month: "Oct", revenue: 25000, orders: 1900, bakeries: 140 },
-    { month: "Nov", revenue: 27000, orders: 2100, bakeries: 158 },
-    { month: "Dic", revenue: 31000, orders: 2500, bakeries: 172 },
-  ],
-  "2026": [
-    { month: "Abr", revenue: 28000, orders: 2180, bakeries: 194 },
-    { month: "May", revenue: 31000, orders: 2420, bakeries: 210 },
-    { month: "Jun", revenue: 35000, orders: 2680, bakeries: 228 },
-    { month: "Jul", revenue: 38000, orders: 2930, bakeries: 242 },
-    { month: "Ago", revenue: 39500, orders: 3100, bakeries: 248 },
-    { month: "Sep", revenue: 42180, orders: 3340, bakeries: 258 },
-  ],
-};
+interface Point { month: string; revenue: number; orders: number; bakeries: number; }
+interface Kpis { conversionPct: number; retentionPct: number; avgTicket: number; totalOrders: number; }
 
+const fmtMoney = (v: number) => (v >= 10000 ? `${(v / 1000).toFixed(0)}k` : v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v)));
 const METRIC_OPTIONS = [
-  { key: "revenue", label: "Ingresos", prefix: "$", format: (v: number) => `${(v / 1000).toFixed(0)}k` },
-  { key: "orders",  label: "Pedidos",  prefix: "",  format: (v: number) => `${(v / 1000).toFixed(1)}k` },
+  { key: "revenue", label: "Ingresos", prefix: "$", format: fmtMoney },
+  { key: "orders",  label: "Pedidos",  prefix: "",  format: (v: number) => String(v) },
   { key: "bakeries",label: "Pastelerías", prefix: "", format: (v: number) => String(v) },
 ];
 
 export default function AdminStats() {
-  const [year, setYear] = useState("2026");
+  const [year, setYear] = useState(String(new Date().getFullYear()));
+  const [years, setYears] = useState<string[]>([String(new Date().getFullYear())]);
   const [metric, setMetric] = useState("revenue");
+  const [data, setData] = useState<Point[]>([]);
+  const [kpis, setKpis] = useState<Kpis>({ conversionPct: 0, retentionPct: 0, avgTicket: 0, totalOrders: 0 });
+  const [plans, setPlans] = useState<{ plan: string; label: string; count: number }[]>([]);
+  const [error, setError] = useState("");
 
-  const data = ALL_DATA[year];
+  // Serie anual y KPIs según el año elegido
+  useEffect(() => {
+    api<{ series: Point[]; kpis: Kpis; years: number[] }>(`/admin/stats?year=${year}`)
+      .then((r) => { setData(r.series); setKpis(r.kpis); setYears(r.years.map(String)); })
+      .catch((e) => setError(e.message));
+  }, [year]);
+
+  useEffect(() => {
+    api<{ subscriptionsByPlan: { plan: string; label: string; count: number }[] }>("/admin/overview")
+      .then((r) => setPlans(r.subscriptionsByPlan))
+      .catch((e) => setError(e.message));
+  }, []);
+
   const m = METRIC_OPTIONS.find(o => o.key === metric)!;
-  const values = data.map(d => d[metric as keyof typeof d] as number);
-  const maxVal = Math.max(...values);
-
+  const values = data.map(d => d[metric as keyof Point] as number);
+  const maxVal = Math.max(1, ...values);
+  const plansTotal = plans.reduce((s, p) => s + p.count, 0) || 1;
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="mb-6">
@@ -42,12 +45,13 @@ export default function AdminStats() {
         <p className="text-muted-foreground text-sm mt-1 font-medium">Tendencias de crecimiento de BakeFlow</p>
       </div>
 
+      {error && <div className="mb-5 bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
         {[
-          { label: "Tasa de conversión", value: "24%",  sub: "Gratuito → Pro", Icon: TrendingUp },
-          { label: "Retención mensual",  value: "92%",  sub: "Suscripciones",  Icon: Lock },
-          { label: "Ticket promedio",    value: "$248", sub: "Por pedido",      Icon: DollarSign },
-          { label: "NPS Score",          value: "78",   sub: "Muy bueno",       Icon: Star },
+          { label: "Conversión a plan de pago",  value: `${kpis.conversionPct}%`,  sub: "Pastelerías en Pro o Premium", Icon: TrendingUp },
+          { label: "Retención de suscripciones", value: `${kpis.retentionPct}%`,  sub: "Suscripciones activas",  Icon: Lock },
+          { label: "Ticket promedio",    value: `$${kpis.avgTicket.toLocaleString()}`, sub: "Por pedido",      Icon: DollarSign },
+          { label: "Pedidos totales",    value: kpis.totalOrders.toLocaleString(),   sub: "Sin cancelados",       Icon: Star },
         ].map(({ label, value, sub, Icon }) => (
           <div key={label} className="bg-card rounded-3xl card-shadow border border-border p-5">
             <div className="w-10 h-10 bg-pink-50 rounded-2xl flex items-center justify-center mb-2">
@@ -72,7 +76,7 @@ export default function AdminStats() {
             </div>
             {/* Year filter */}
             <div className="flex bg-muted rounded-xl p-0.5 gap-0.5">
-              {["2025", "2026"].map(y => (
+              {years.map(y => (
                 <button key={y} onClick={() => setYear(y)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${year === y ? "bg-pink-500 text-white" : "text-muted-foreground hover:text-foreground"}`}>
                   {y}
@@ -109,11 +113,11 @@ export default function AdminStats() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {[
-          { plan: "Gratuito", count: 59, pct: 24, color: "bg-pink-300", Icon: Flower2 },
-          { plan: "Pro",      count: 131, pct: 53, color: "bg-violet-400", Icon: Star },
-          { plan: "Premium",  count: 58, pct: 23, color: "bg-amber-400", Icon: Crown },
-        ].map(({ plan, count, pct, color, Icon }) => (
+        {plans.map((p) => ({
+          plan: p.label, count: p.count, pct: Math.round((p.count / plansTotal) * 100),
+          color: p.plan === "basic" ? "bg-pink-300" : p.plan === "pro" ? "bg-violet-400" : "bg-amber-400",
+          Icon: p.plan === "basic" ? Flower2 : p.plan === "pro" ? Star : Crown,
+        })).map(({ plan, count, pct, color, Icon }) => (
           <div key={plan} className="bg-card rounded-3xl card-shadow border border-border p-5">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">

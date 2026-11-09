@@ -1,25 +1,28 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { api } from "../../services/api";
 import { Star, TrendingUp, DollarSign, CreditCard, Search, Filter, Store } from "lucide-react";
 
-const TRANSACTIONS = [
-  { id: "TXN-001", bakery: "Pastelería Luna", type: "subscription", desc: "Plan Premium - Sep 2026", amount: 299, date: "1 Sep" },
-  { id: "TXN-002", bakery: "Dulcería Rosita", type: "subscription", desc: "Plan Pro - Sep 2026", amount: 199, date: "1 Sep" },
-  { id: "TXN-003", bakery: "Pastel Kawaii", type: "commission", desc: "Comisión 5% · Ventas $2,800", amount: 140, date: "3 Sep" },
-  { id: "TXN-004", bakery: "Cakes & More", type: "subscription", desc: "Plan Pro - Sep 2026", amount: 199, date: "1 Sep" },
-  { id: "TXN-005", bakery: "Pastelería Luna", type: "commission", desc: "Comisión 5% · Ventas $4,100", amount: 205, date: "5 Sep" },
-  { id: "TXN-006", bakery: "Pastel Kawaii", type: "subscription", desc: "Renovación Premium", amount: 299, date: "15 Sep" },
-  { id: "TXN-007", bakery: "Dulcería Rosita", type: "commission", desc: "Comisión 5% · Ventas $1,900", amount: 95, date: "10 Sep" },
-  { id: "TXN-008", bakery: "Sweet Dreams", type: "subscription", desc: "Plan Gratuito", amount: 0, date: "1 Sep" },
-];
-
-const BAKERIES = [...new Set(TRANSACTIONS.map((t) => t.bakery))];
-
+interface Txn { id: string; bakery: string; type: string; desc: string; amount: number; date: string; }
 export default function AdminTransactions() {
+  const [TRANSACTIONS, setTransactions] = useState<Txn[]>([]);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api<{ transactions: any[] }>("/admin/transactions")
+      .then(({ transactions }) => setTransactions(transactions.map((t) => ({
+        ...t, date: new Date(t.date).toLocaleDateString("es-MX", { day: "numeric", month: "short" }),
+      }))))
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [bakeryFilter, setBakeryFilter] = useState("all");
   const [tab, setTab] = useState<"list" | "report">("list");
 
+  const BAKERIES = [...new Set(TRANSACTIONS.map((t) => t.bakery))];
   const total = TRANSACTIONS.reduce((s, t) => s + t.amount, 0);
   const subs = TRANSACTIONS.filter((t) => t.type === "subscription").reduce((s, t) => s + t.amount, 0);
   const commissions = TRANSACTIONS.filter((t) => t.type === "commission").reduce((s, t) => s + t.amount, 0);
@@ -51,6 +54,8 @@ export default function AdminTransactions() {
         <p className="text-muted-foreground text-sm mt-1 font-medium">Movimientos registrados en la plataforma</p>
       </div>
 
+      {error && <div className="mb-5 bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
+      {loading && <p className="mb-5 text-sm text-muted-foreground">Cargando transacciones...</p>}
       <div className="grid grid-cols-3 gap-4 mb-6">
         {[
           { label: "Total recaudado", value: `$${total.toLocaleString()}`, Icon: DollarSign, color: "bg-pink-500" },

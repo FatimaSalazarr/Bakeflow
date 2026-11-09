@@ -1,14 +1,15 @@
-import { useState } from "react";
-import { Mail, Phone, MapPin, Cake, User, Pencil, Check, Package, Lock, Eye, EyeOff } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Phone, MapPin, Cake, User, Pencil, Check, Package, Lock, Eye, EyeOff } from "lucide-react";
+import { api, getStoredUser } from "../../services/api";
 
 interface Props { userName: string; }
 
 export default function CustomerProfile({ userName }: Props) {
   const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({
-    name: userName, email: "luna@mail.com", phone: "+52 55 1234 5678",
-    address: "Calle Rosa 42, Col. Las Flores, CDMX", birthday: "1998-03-15",
-  });
+  const [form, setForm] = useState({ name: userName, email: "", phone: "", address: "", birthday: "" });
+  const [stats, setStats] = useState({ orders: 0, cakes: 0, favoriteBakery: "—" });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
   const [pwForm, setPwForm] = useState({ current: "", next: "", confirm: "" });
   const [showCurrent, setShowCurrent] = useState(false);
@@ -16,26 +17,61 @@ export default function CustomerProfile({ userName }: Props) {
   const [pwError, setPwError] = useState("");
   const [pwSaved, setPwSaved] = useState(false);
 
-  function changePassword(e: React.FormEvent) {
+  async function changePassword(e: React.FormEvent) {
     e.preventDefault();
-    if (pwForm.current !== "demo123") { setPwError("La contraseña actual es incorrecta."); return; }
     if (pwForm.next.length < 8) { setPwError("La nueva contraseña debe tener al menos 8 caracteres."); return; }
     if (pwForm.next !== pwForm.confirm) { setPwError("Las contraseñas no coinciden."); return; }
     setPwError("");
+    try {
+      await api("/users/password", { method: "PUT", body: { currentPassword: pwForm.current, newPassword: pwForm.next } });
+    } catch (err) {
+      setPwError(err instanceof Error ? err.message : "No se pudo cambiar la contraseña.");
+      return;
+    }
     setPwForm({ current: "", next: "", confirm: "" });
     setPwSaved(true);
     setTimeout(() => setPwSaved(false), 3000);
   }
 
-  function save() {
-    setEditing(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+  useEffect(() => {
+    Promise.all([
+      api<{ user: any }>("/auth/me"),
+      api<{ orders: any[] }>("/orders"),
+    ])
+      .then(([{ user }, { orders }]) => {
+        setForm({
+          name: user.name, email: user.email, phone: user.phone || "",
+          address: user.address || "", birthday: user.birthday ? user.birthday.slice(0, 10) : "",
+        });
+        const cakes = orders.reduce((s, o) => s + (o.items || []).reduce((t: number, i: any) => t + i.quantity, 0), 0);
+        const counts: Record<string, number> = {};
+        orders.forEach((o) => { const n = o.bakeryId?.name; if (n) counts[n] = (counts[n] || 0) + 1; });
+        const favorite = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
+        setStats({ orders: orders.length, cakes, favoriteBakery: favorite });
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function save() {
+    setError("");
+    try {
+      const { user } = await api<{ user: any }>("/users/profile", {
+        method: "PUT",
+        body: { name: form.name.trim(), phone: form.phone, address: form.address, birthday: form.birthday || null },
+      });
+      localStorage.setItem("bakeflow_user", JSON.stringify({ ...getStoredUser(), name: user.name }));
+      setForm((f) => ({ ...f, name: user.name }));
+      setEditing(false);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo guardar el perfil.");
+    }
   }
 
   const fields = [
     { key: "name", label: "Nombre completo", type: "text", Icon: User },
-    { key: "email", label: "Correo electrónico", type: "email", Icon: Mail },
     { key: "phone", label: "Teléfono", type: "tel", Icon: Phone },
     { key: "address", label: "Dirección", type: "text", Icon: MapPin },
     { key: "birthday", label: "Fecha de nacimiento", type: "date", Icon: Cake },
@@ -51,9 +87,9 @@ export default function CustomerProfile({ userName }: Props) {
       {/* Estadísticas movidas arriba */}
       <div className="grid grid-cols-3 gap-4 mb-5">
         {[
-          { label: "Pedidos totales", value: "12", Icon: Package },
-          { label: "Pasteles ordenados", value: "18", Icon: Cake },
-          { label: "Pastelería favorita", value: "Rosita", Icon: User },
+          { label: "Pedidos totales", value: String(stats.orders), Icon: Package },
+          { label: "Pasteles ordenados", value: String(stats.cakes), Icon: Cake },
+          { label: "Pastelería favorita", value: stats.favoriteBakery, Icon: User },
         ].map(({ label, value, Icon }) => (
           <div key={label} className="bg-card rounded-3xl card-shadow border border-border p-4 text-center">
             <div className="flex justify-center mb-1">
@@ -70,6 +106,11 @@ export default function CustomerProfile({ userName }: Props) {
           <Check size={16} /> Cambios guardados correctamente
         </div>
       )}
+
+      {error && (
+        <div className="mb-5 bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>
+      )}
+      {loading && <p className="mb-5 text-sm text-muted-foreground">Cargando tu perfil...</p>}
 
       <div className="bg-card rounded-3xl card-shadow border border-border p-6 mb-5">
         <div className="flex items-center gap-5">

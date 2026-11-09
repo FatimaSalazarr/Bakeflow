@@ -1,28 +1,32 @@
-import { useState } from "react";
+ import { useState } from "react";
 import { ShoppingCart } from "lucide-react";
 import Layout from "../../components/Layout";
 import CustomerHome from "./CustomerHome";
-import CustomerMenu from "./CustomerMenu";
+import CustomerMenu, { type CartLine } from "./CustomerMenu";
 import CustomOrder from "./CustomOrder";
 import MyOrders from "./MyOrders";
 import CustomerNotifications from "./CustomerNotifications";
 import CustomerProfile from "./CustomerProfile";
-import type { SharedRequest } from "../../App";
+import { useUnreadNotifications } from "../../hooks/useUnreadNotifications";
+import { useOrderCount } from "../../hooks/useOrderCount";
 
 interface Props {
   userName: string;
   onLogout: () => void;
-  customRequests: SharedRequest[];
-  onUpdateRequests: (reqs: SharedRequest[]) => void;
 }
 
-export default function CustomerApp({ userName, onLogout, customRequests, onUpdateRequests }: Props) {
+// 1. Quitar customRequests y onUpdateRequests de aquí
+export default function CustomerApp({ userName, onLogout }: Props) {
   const [page, setPage] = useState("home");
-  const [cart, setCart] = useState<{ id: number; qty: number }[]>([]);
+  const [cart, setCart] = useState<CartLine[]>([]);
   const [showCart, setShowCart] = useState(false);
 
   const cartCount = cart.reduce((s, c) => s + c.qty, 0);
-  const pendingPrice = customRequests.filter(r => r.status === "awaiting_client").length;
+  const unreadNotifs = useUnreadNotifications();
+  
+  // Notificaciones sin leer + cotizaciones esperando tu respuesta
+  const quotesWaiting = useOrderCount("type=custom&status=awaiting_client");
+  const pendingPrice = unreadNotifs + quotesWaiting; 
 
   function openCart() {
     if (page !== "menu") setPage("menu");
@@ -32,7 +36,8 @@ export default function CustomerApp({ userName, onLogout, customRequests, onUpda
   const pages: Record<string, React.ReactNode> = {
     home: <CustomerHome userName={userName} onNavigate={setPage} />,
     menu: <CustomerMenu cart={cart} setCart={setCart} showCart={showCart} setShowCart={setShowCart} />,
-    "custom-order": <CustomOrder customRequests={customRequests} onUpdateRequests={onUpdateRequests} />,
+    // 3. Ya no le pasamos props a CustomOrder (hará su propio fetch igual que CustomRequests)
+    "custom-order": <CustomOrder />,
     "my-orders": <MyOrders />,
     notifications: <CustomerNotifications />,
     profile: <CustomerProfile userName={userName} />,

@@ -1,22 +1,30 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { api } from "../../services/api";
 import { TrendingUp, TrendingDown, Sparkles, Plus, X, DollarSign, Search, Filter } from "lucide-react";
 
-const TRANSACTIONS = [
-  { id: 1, type: "income", desc: "Pedido #1042 - Luna García", amount: 480, date: "10 Sep", category: "Venta" },
-  { id: 2, type: "income", desc: "Pedido #1038 - Paola Jiménez", amount: 520, date: "8 Sep", category: "Venta" },
-  { id: 3, type: "expense", desc: "Harina y azúcar - Proveedor Central", amount: 340, date: "7 Sep", category: "Ingredientes" },
-  { id: 4, type: "income", desc: "Pedido #1031 - Carlos Ramos", amount: 240, date: "5 Sep", category: "Venta" },
-  { id: 5, type: "expense", desc: "Cajas y empaques", amount: 180, date: "5 Sep", category: "Materiales" },
-  { id: 6, type: "income", desc: "Pedido #1030 - Ana Torres", amount: 650, date: "3 Sep", category: "Venta" },
-  { id: 7, type: "expense", desc: "Luz y gas", amount: 420, date: "1 Sep", category: "Servicios" },
-  { id: 8, type: "expense", desc: "Mantequilla y huevos", amount: 260, date: "1 Sep", category: "Ingredientes" },
-];
+interface Tx { id: string; type: "income" | "expense"; desc: string; amount: number; date: string; category: string; }
 
+function toTx(r: any): Tx {
+  return {
+    id: r._id, type: r.type, desc: r.concept, amount: r.amount, category: r.category || "Otro",
+    date: new Date(r.date).toLocaleDateString("es-MX", { day: "numeric", month: "short" }),
+  };
+}
 export default function Finances() {
   const [showModal, setShowModal] = useState(false);
   const [txType, setTxType] = useState<"income" | "expense">("income");
   const [form, setForm] = useState({ desc: "", amount: "", category: "Venta", date: "" });
-  const [transactions, setTransactions] = useState(TRANSACTIONS);
+  const [transactions, setTransactions] = useState<Tx[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api<{ records: any[] }>("/finances")
+      .then(({ records }) => setTransactions(records.map(toTx)))
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
   const [filter, setFilter] = useState("all");
   const [catFilter, setCatFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -34,19 +42,31 @@ export default function Finances() {
     return matchType && matchCat && matchSearch;
   });
 
-  function save() {
-    if (!form.desc || !form.amount) return;
-    setTransactions((prev) => [{ id: Date.now(), type: txType, desc: form.desc, amount: Number(form.amount), date: form.date || "Hoy", category: form.category }, ...prev]);
-    setShowModal(false);
-    setForm({ desc: "", amount: "", category: "Venta", date: "" });
+  async function save() {
+    const amount = Number(form.amount);
+    if (!form.desc.trim() || !(amount > 0)) { setError("Indica una descripción y un monto mayor a 0."); return; }
+    setError("");
+    setSaving(true);
+    try {
+      const { record } = await api<{ record: any }>("/finances", {
+        method: "POST",
+        body: { type: txType, concept: form.desc.trim(), amount, category: form.category, ...(form.date ? { date: form.date } : {}) },
+      });
+      setTransactions((prev) => [toTx(record), ...prev]);
+      setShowModal(false);
+      setForm({ desc: "", amount: "", category: "Venta", date: "" });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo registrar el movimiento.");
+    } finally {
+      setSaving(false);
+    }
   }
-
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="font-display text-3xl font-semibold text-foreground">Finanzas</h1>
-          <p className="text-muted-foreground text-sm mt-1 font-medium">Septiembre 2026</p>
+          <p className="text-muted-foreground text-sm mt-1 font-medium">Historial de movimientos</p>
         </div>
         <button onClick={() => setShowModal(true)}
           className="flex items-center gap-2 px-5 py-2.5 bg-pink-500 hover:bg-pink-600 text-white font-bold rounded-2xl text-sm active:scale-95 transition-all">
@@ -54,6 +74,8 @@ export default function Finances() {
         </button>
       </div>
 
+      {error && <div className="mb-4 bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
+      {loading && <p className="text-sm text-muted-foreground mb-4">Cargando movimientos...</p>}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
         <div className="bg-card rounded-3xl card-shadow border border-border p-5">
           <div className="w-11 h-11 bg-pink-500 rounded-2xl flex items-center justify-center mb-3">
@@ -169,9 +191,10 @@ export default function Finances() {
                   {["Venta", "Ingredientes", "Materiales", "Servicios", "Nómina", "Otro"].map((c) => <option key={c}>{c}</option>)}
                 </select>
               </div>
+              {error && <div className="bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
               <div className="flex gap-3 pt-1">
                 <button onClick={() => setShowModal(false)} className="flex-1 py-3 border-2 border-border text-foreground font-bold rounded-2xl hover:bg-muted">Cancelar</button>
-                <button onClick={save} className="flex-1 py-3 bg-pink-500 hover:bg-pink-600 text-white font-bold rounded-2xl shadow-md">Registrar</button>
+                <button onClick={save} disabled={saving} className="disabled:opacity-60 flex-1 py-3 bg-pink-500 hover:bg-pink-600 text-white font-bold rounded-2xl shadow-md">Registrar</button>
               </div>
             </div>
           </div>

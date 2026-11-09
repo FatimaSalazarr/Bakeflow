@@ -1,15 +1,14 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { api } from "../../services/api";
 import { Plus, Pencil, X, Users } from "lucide-react";
 
 const ROLES = ["Pastelera", "Decoradora", "Repartidora", "Cajera", "Asistente"];
 
-const INITIAL_EMPLOYEES = [
-  { id: 1, name: "Sofía López", role: "Pastelera", email: "sofia@rosita.com", phone: "+52 55 1234 5678", active: true, orders: 12 },
-  { id: 2, name: "Mia Ramírez", role: "Decoradora", email: "mia@rosita.com", phone: "+52 55 8765 4321", active: true, orders: 8 },
-  { id: 3, name: "Daniela Cruz", role: "Pastelera", email: "daniela@rosita.com", phone: "+52 55 2222 3333", active: true, orders: 10 },
-  { id: 4, name: "Karen Vega", role: "Repartidora", email: "karen@rosita.com", phone: "+52 55 4444 5555", active: false, orders: 5 },
-];
+interface Employee { id: string; name: string; role: string; email: string; phone: string; active: boolean; orders: number; }
 
+function toEmployee(u: any, orders: number): Employee {
+  return { id: u._id, name: u.name, role: u.jobTitle || "Asistente", email: u.email, phone: u.phone || "", active: u.status === "active", orders };
+}
 const ROLE_COLORS: Record<string, string> = {
   Pastelera: "bg-pink-100 text-pink-700",
   Decoradora: "bg-purple-100 text-purple-700",
@@ -19,20 +18,70 @@ const ROLE_COLORS: Record<string, string> = {
 };
 
 export default function EmployeeManagement() {
-  const [employees, setEmployees] = useState(INITIAL_EMPLOYEES);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
   const [showModal, setShowModal] = useState(false);
-  const [editEmp, setEditEmp] = useState<typeof INITIAL_EMPLOYEES[0] | null>(null);
-  const [form, setForm] = useState({ name: "", role: "Pastelera", email: "", phone: "" });
+  const [editEmp, setEditEmp] = useState<Employee | null>(null);
+  const [form, setForm] = useState({ name: "", role: "Pastelera", email: "", phone: "", password: "" });
 
-  function openNew() { setEditEmp(null); setForm({ name: "", role: "Pastelera", email: "", phone: "" }); setShowModal(true); }
-  function openEdit(emp: typeof INITIAL_EMPLOYEES[0]) { setEditEmp(emp); setForm({ name: emp.name, role: emp.role, email: emp.email, phone: emp.phone }); setShowModal(true); }
-  function save() {
-    if (editEmp) setEmployees((prev) => prev.map((e) => e.id === editEmp.id ? { ...e, ...form } : e));
-    else setEmployees((prev) => [...prev, { id: Date.now(), ...form, active: true, orders: 0 }]);
-    setShowModal(false);
+  useEffect(() => {
+    Promise.all([
+      api<{ users: any[] }>("/users"),
+      api<{ orders: any[] }>("/orders").catch(() => ({ orders: [] as any[] })),
+    ])
+      .then(([u, o]) => {
+        const counts: Record<string, number> = {};
+        o.orders.forEach((ord) => { const id = ord.assignedEmployeeId?._id; if (id) counts[id] = (counts[id] || 0) + 1; });
+        setEmployees(u.users.map((usr) => toEmployee(usr, counts[usr._id] || 0)));
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  function openNew() { setEditEmp(null); setError(""); setForm({ name: "", role: "Pastelera", email: "", phone: "", password: "" }); setShowModal(true); }
+  function openEdit(emp: Employee) { setEditEmp(emp); setError(""); setForm({ name: emp.name, role: emp.role, email: emp.email, phone: emp.phone, password: "" }); setShowModal(true); }
+
+  async function save() {
+    if (!form.name.trim() || (!editEmp && (!form.email.trim() || form.password.length < 6))) {
+      setError(editEmp ? "El nombre es obligatorio." : "Nombre, correo y una contraseña de al menos 6 caracteres son obligatorios.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      if (editEmp) {
+        const { employee } = await api<{ employee: any }>("/users/employees/" + editEmp.id, {
+          method: "PUT", body: { name: form.name.trim(), phone: form.phone, jobTitle: form.role },
+        });
+        setEmployees((prev) => prev.map((e) => e.id === editEmp.id ? toEmployee(employee, e.orders) : e));
+      } else {
+        const { employee } = await api<{ employee: any }>("/users/employees", {
+          method: "POST",
+          body: { name: form.name.trim(), email: form.email.trim(), phone: form.phone, password: form.password, jobTitle: form.role },
+        });
+        setEmployees((prev) => [...prev, toEmployee(employee, 0)]);
+      }
+      setShowModal(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo guardar la empleada.");
+    } finally {
+      setSaving(false);
+    }
   }
-  function toggle(id: number) { setEmployees((prev) => prev.map((e) => e.id === id ? { ...e, active: !e.active } : e)); }
 
+  async function toggle(id: string) {
+    const emp = employees.find((e) => e.id === id);
+    if (!emp) return;
+    setError("");
+    try {
+      await api("/users/employees/" + id, { method: "PUT", body: { status: emp.active ? "suspended" : "active" } });
+      setEmployees((prev) => prev.map((e) => e.id === id ? { ...e, active: !e.active } : e));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo cambiar el estado.");
+    }
+  }
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-6">
@@ -48,6 +97,9 @@ export default function EmployeeManagement() {
         </button>
       </div>
 
+      {error && !showModal && <div className="mb-4 bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
+      {loading && <p className="text-sm text-muted-foreground mb-4">Cargando empleados...</p>}
+      {!loading && employees.length === 0 && <p className="text-sm text-muted-foreground mb-4">Aún no has registrado empleadas.</p>}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {employees.map((emp) => (
           <div key={emp.id} className={`bg-card rounded-3xl card-shadow border p-5 transition-all ${emp.active ? "border-border" : "border-dashed border-border opacity-60"}`}>
@@ -94,11 +146,12 @@ export default function EmployeeManagement() {
                 { key: "name", label: "Nombre completo", type: "text", ph: "Nombre de la empleada" },
                 { key: "email", label: "Correo electrónico", type: "email", ph: "correo@pasteleria.com" },
                 { key: "phone", label: "Teléfono", type: "tel", ph: "+52 55 0000 0000" },
+                ...(editEmp ? [] : [{ key: "password", label: "Contraseña inicial", type: "password", ph: "Mínimo 6 caracteres" }]),
               ].map((f) => (
                 <div key={f.key}>
                   <label className="block text-xs font-bold text-foreground mb-1.5">{f.label}</label>
                   <input type={f.type} value={form[f.key as keyof typeof form]} onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
-                    placeholder={f.ph} className="w-full px-4 py-3 rounded-2xl border-2 border-border bg-muted focus:outline-none focus:border-pink-400 text-sm font-medium" />
+                    placeholder={f.ph} disabled={!!editEmp && f.key === "email"} className="w-full px-4 py-3 rounded-2xl border-2 border-border bg-muted focus:outline-none focus:border-pink-400 text-sm font-medium" />
                 </div>
               ))}
               <div>
@@ -108,9 +161,10 @@ export default function EmployeeManagement() {
                   {ROLES.map((r) => <option key={r}>{r}</option>)}
                 </select>
               </div>
+              {error && <div className="bg-pink-50 border border-pink-200 text-pink-600 text-xs font-semibold px-4 py-3 rounded-2xl">{error}</div>}
               <div className="flex gap-3 pt-1">
                 <button onClick={() => setShowModal(false)} className="flex-1 py-3 border-2 border-border text-foreground font-bold rounded-2xl hover:bg-muted">Cancelar</button>
-                <button onClick={save} className="flex-1 py-3 bg-pink-500 hover:bg-pink-600 text-white font-bold rounded-2xl shadow-md">
+                <button onClick={save} disabled={saving} className="disabled:opacity-60 flex-1 py-3 bg-pink-500 hover:bg-pink-600 text-white font-bold rounded-2xl shadow-md">
                   {editEmp ? "Guardar" : "Agregar"}
                 </button>
               </div>
